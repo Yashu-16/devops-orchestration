@@ -383,7 +383,7 @@ def get_pipeline_ml(
                 "description": r.description,
                 "action":      r.action,
             }
-            for r in (recs[:3] if recs else [])
+            for r in (recs.recommendations[:3] if recs else [])
         ],
         "risk_trend": risk_trend,
     }
