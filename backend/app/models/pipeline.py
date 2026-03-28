@@ -98,6 +98,18 @@ class Integration(Base):
     def __repr__(self):
         return f"<Integration platform={self.platform} org={self.organization_id}>"
 
+class PipelineMember(Base):
+    """Junction table — which users have access to which pipelines."""
+    __tablename__ = "pipeline_members"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id"), nullable=False)
+    user_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+    pipeline = relationship("Pipeline", foreign_keys=[pipeline_id])
+    user     = relationship("User", foreign_keys=[user_id])
+
 class NotificationPreference(Base):
     """
     Per-user notification preferences.
