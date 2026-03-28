@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 # ── Which failure categories are safe to auto-retry ──────────────
-# Infrastructure and unknown failures are often transient.
-# Code failures (test, lint, build) should NOT be blindly retried
-# — they need a human to fix the underlying issue.
+# EXPANDED: test_failure and dependency are now retryable
+# because flaky tests and transient dependency resolution
+# issues are very common in real CI/CD environments.
 
 RETRYABLE_CATEGORIES = {
     "infrastructure",
