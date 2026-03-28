@@ -1,0 +1,33 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/*.db
+backend/*.sqlite3
+backend/.env
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# ML Models (too large for git)
+backend/app/ml/saved_models/
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.pem
+*.key
+.env.production
