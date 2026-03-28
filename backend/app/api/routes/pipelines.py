@@ -166,7 +166,6 @@ def list_runs(
     db: Session = Depends(get_db),
     org_id: int = Depends(get_current_org_id),
 ):
-    # Join with Pipeline to filter by org
     runs = (
         db.query(PipelineRun)
         .join(Pipeline, PipelineRun.pipeline_id == Pipeline.id)
@@ -446,32 +445,6 @@ def update_healing_config(
     )
 
 
-@router.get("/pipelines/{pipeline_id}/healing",
-            response_model=List[HealingLogResponse], tags=["Self-Healing"])
-def get_healing_logs(
-    pipeline_id: int,
-    db: Session = Depends(get_db),
-    org_id: int = Depends(get_current_org_id),
-):
-    from app.models.pipeline import HealingLog
-    # Verify pipeline belongs to this org first
-    p = db.query(Pipeline).filter(
-        Pipeline.id == pipeline_id,
-        Pipeline.organization_id == org_id,
-    ).first()
-    if not p:
-        raise HTTPException(status_code=404, detail="Pipeline not found")
-
-    logs = (
-        db.query(HealingLog)
-        .filter(HealingLog.pipeline_id == pipeline_id)
-        .order_by(HealingLog.created_at.desc())
-        .limit(50)
-        .all()
-    )
-    return logs
-
-
 @router.get("/dashboard/healing",
             response_model=List[HealingLogResponse], tags=["Self-Healing"])
 def get_all_healing_logs(
@@ -496,7 +469,6 @@ def get_stats(
     db: Session = Depends(get_db),
     org_id: int = Depends(get_current_org_id),
 ):
-    # All queries filtered by org
     total_pipelines = db.query(Pipeline).filter(
         Pipeline.organization_id == org_id
     ).count()
@@ -522,7 +494,6 @@ def get_stats(
         Pipeline.organization_id == org_id
     ).scalar() or 0.0
 
-    # Most failing stage for this org only
     failed_stages = (
         db.query(PipelineRun.failed_stage)
         .join(Pipeline)
@@ -545,7 +516,6 @@ def get_stats(
         .count()
     )
 
-    # Failure categories for this org only
     failed_runs_with_cause = (
         db.query(PipelineRun.root_cause)
         .join(Pipeline)
