@@ -1,6 +1,5 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
@@ -10,10 +9,15 @@ from app.db.database import engine, Base
 from app.api.routes import pipelines, auth, team, integrations, notifications, ml
 
 setup_logging()
-
 import logging
 logger = logging.getLogger(__name__)
 
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Max-Age": "86400",
+}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -21,8 +25,6 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ready")
     yield
-    logger.info(f"Shutting down {settings.APP_NAME}")
-
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -32,26 +34,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-# ── Manual CORS — handles OPTIONS preflight ───────────────────────
+# This middleware runs on EVERY request including OPTIONS
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
-        response = Response()
-        response.headers["Access-Control-Allow-Origin"]  = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        response.headers["Access-Control-Max-Age"]       = "86400"
-        return response
-
+        return Response(status_code=200, headers=CORS_HEADERS)
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"]  = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    for key, value in CORS_HEADERS.items():
+        response.headers[key] = value
     return response
 
-
-# ── Standard CORS middleware as backup ────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -60,10 +52,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Error handlers ────────────────────────────────────────────────
 register_error_handlers(app)
 
-# ── Routes ────────────────────────────────────────────────────────
 app.include_router(auth.router,          prefix="/api/v1")
 app.include_router(pipelines.router,     prefix="/api/v1")
 app.include_router(team.router,          prefix="/api/v1")
@@ -71,8 +61,7 @@ app.include_router(integrations.router,  prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(ml.router,            prefix="/api/v1")
 
-
-@app.get("/health", tags=["System"])
+@app.get("/health")
 def health_check():
     from app.db.database import SessionLocal
     from sqlalchemy import text
@@ -83,19 +72,8 @@ def health_check():
         db.close()
     except Exception:
         db_status = "unhealthy"
-    return {
-        "status":      "healthy" if db_status == "healthy" else "degraded",
-        "app":         settings.APP_NAME,
-        "version":     settings.APP_VERSION,
-        "environment": settings.ENVIRONMENT,
-        "database":    db_status,
-    }
+    return {"status": "healthy", "app": settings.APP_NAME, "version": settings.APP_VERSION, "environment": settings.ENVIRONMENT, "database": db_status}
 
-
-@app.get("/", tags=["System"])
+@app.get("/")
 def root():
-    return {
-        "app":     settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "docs":    "/docs",
-    }
+    return {"app": settings.APP_NAME, "version": settings.APP_VERSION}
