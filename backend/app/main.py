@@ -33,10 +33,9 @@ app = FastAPI(
 )
 
 
-# ── Manual CORS middleware — handles OPTIONS preflight ────────────
+# ── Manual CORS — handles OPTIONS preflight ───────────────────────
 @app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    # Handle preflight OPTIONS request
+async def cors_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
         response = Response()
         response.headers["Access-Control-Allow-Origin"]  = "*"
@@ -45,7 +44,6 @@ async def add_cors_headers(request: Request, call_next):
         response.headers["Access-Control-Max-Age"]       = "86400"
         return response
 
-    # Handle all other requests
     response = await call_next(request)
     response.headers["Access-Control-Allow-Origin"]  = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"

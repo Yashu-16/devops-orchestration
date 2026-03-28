@@ -17,6 +17,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        {/* Runtime config — loads API URL without needing a rebuild */}
+        <script src="/config.js" />
+      </head>
       <body className={`${geist.className} bg-gray-950 text-white`}>
         <AuthWrapper>{children}</AuthWrapper>
       </body>

@@ -4,8 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 
-// Backend URL — set via environment variable in Railway
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Gets backend URL at runtime from config.js
+// This avoids the Next.js build-time environment variable problem
+function getBackend(): string {
+  if (typeof window !== "undefined") {
+    const w = window as any;
+    if (w.__API_URL__) return w.__API_URL__;
+  }
+  return "http://localhost:8000";
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,10 +36,12 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
+    const backend = getBackend();
+
     try {
       if (mode === "signup") {
         const res = await axios.post(
-          `${BACKEND}/api/v1/auth/signup`,
+          `${backend}/api/v1/auth/signup`,
           {
             email:    form.email.trim(),
             password: form.password,
@@ -51,7 +60,7 @@ export default function LoginPage() {
         params.append("password", form.password);
 
         const res = await axios.post(
-          `${BACKEND}/api/v1/auth/login`,
+          `${backend}/api/v1/auth/login`,
           params,
           { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
         );
@@ -91,7 +100,6 @@ export default function LoginPage() {
 
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8">
 
-          {/* Tab switcher */}
           <div className="flex bg-gray-800 rounded-lg p-1 mb-6">
             {(["login", "signup"] as const).map(m => (
               <button key={m}
@@ -106,81 +114,57 @@ export default function LoginPage() {
             ))}
           </div>
 
-          {/* Error */}
           {error && (
             <div className="bg-red-950 border border-red-800 text-red-300 px-4 py-3 rounded-lg text-sm mb-4">
               {error}
             </div>
           )}
 
-          {/* Form */}
           <div className="space-y-4">
             {mode === "signup" && (
               <>
                 <div>
                   <label className="text-xs text-gray-400 mb-1.5 block">Full Name</label>
-                  <input
-                    type="text"
-                    placeholder="John Smith"
-                    value={form.name}
-                    onChange={update("name")}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
-                  />
+                  <input type="text" placeholder="John Smith"
+                    value={form.name} onChange={update("name")}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500" />
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 mb-1.5 block">Company / Team Name</label>
-                  <input
-                    type="text"
-                    placeholder="Acme Corp"
-                    value={form.org_name}
-                    onChange={update("org_name")}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
-                  />
+                  <input type="text" placeholder="Acme Corp"
+                    value={form.org_name} onChange={update("org_name")}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500" />
                 </div>
               </>
             )}
 
             <div>
               <label className="text-xs text-gray-400 mb-1.5 block">Email Address</label>
-              <input
-                type="email"
-                placeholder="you@company.com"
-                value={form.email}
-                onChange={update("email")}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
-              />
+              <input type="email" placeholder="you@company.com"
+                value={form.email} onChange={update("email")}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500" />
             </div>
 
             <div>
               <label className="text-xs text-gray-400 mb-1.5 block">Password</label>
-              <input
-                type="password"
+              <input type="password"
                 placeholder={mode === "signup" ? "Min 8 characters" : "Your password"}
-                value={form.password}
-                onChange={update("password")}
+                value={form.password} onChange={update("password")}
                 onKeyDown={e => e.key === "Enter" && handleSubmit()}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
-              />
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500" />
             </div>
 
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white font-medium py-2.5 rounded-lg transition-colors text-sm mt-2"
-            >
-              {loading
-                ? "Please wait..."
-                : mode === "login" ? "Sign In" : "Create Account"}
+            <button onClick={handleSubmit} disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white font-medium py-2.5 rounded-lg transition-colors text-sm mt-2">
+              {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
             </button>
           </div>
 
           {mode === "login" && (
             <p className="text-center text-xs text-gray-600 mt-4">
               No account?{" "}
-              <button
-                onClick={() => { setMode("signup"); setError(null); }}
-                className="text-blue-400 hover:text-blue-300"
-              >
+              <button onClick={() => { setMode("signup"); setError(null); }}
+                className="text-blue-400 hover:text-blue-300">
                 Sign up free
               </button>
             </p>
