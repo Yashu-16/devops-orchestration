@@ -20,7 +20,7 @@ from sqlalchemy import func
 from app.db.database import get_db
 from app.models.pipeline import (
     Pipeline, PipelineRun, PipelineStatus,
-    HealingEvent, User, PipelineMember,
+    HealingLog, User, PipelineMember,
 )
 from app.core.auth import get_current_user
 from app.services.risk_engine import RiskEngine
@@ -276,9 +276,9 @@ def get_pipeline_healing(
     pipeline = get_pipeline_or_404(pipeline_id, db, current_user)
 
     events = (
-        db.query(HealingEvent)
-        .filter(HealingEvent.pipeline_id == pipeline_id)
-        .order_by(HealingEvent.created_at.desc())
+        db.query(HealingLog)
+        .filter(HealingLog.pipeline_id == pipeline_id)
+        .order_by(HealingLog.created_at.desc())
         .limit(50)
         .all()
     )
