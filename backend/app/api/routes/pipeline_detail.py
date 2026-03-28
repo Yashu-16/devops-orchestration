@@ -209,4 +209,4 @@ def remove_pipeline_member(pipeline_id: int, user_id: int, db: Session = Depends
         raise HTTPException(status_code=403, detail="Only admins and owners can remove members")
     db.query(PipelineMember).filter(PipelineMember.pipeline_id == pipeline_id, PipelineMember.user_id == user_id).delete()
     db.commit()
-    return {"status": "removed"}
+    return {"status": "removed"}# healed

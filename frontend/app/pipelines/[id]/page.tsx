@@ -580,4 +580,4 @@ export default function PipelineDetailPage() {
       )}
     </div>
   );
-}
+}// healed
