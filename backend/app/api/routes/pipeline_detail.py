@@ -284,7 +284,7 @@ def get_pipeline_healing(
     )
 
     total     = len(events)
-    succeeded = sum(1 for e in events if e.succeeded)
+    succeeded = sum(1 for e in events if e.result == "retry_succeeded")
     failed_h  = total - succeeded
 
     return {
@@ -302,8 +302,8 @@ def get_pipeline_healing(
                 "run_id":        e.run_id,
                 "action":        e.action,
                 "reason":        e.reason,
-                "succeeded":     e.succeeded,
-                "retry_count":   e.retry_count,
+                "succeeded":     e.result == "retry_succeeded",
+                "retry_count":   e.retry_number,
                 "created_at":    e.created_at,
             }
             for e in events
