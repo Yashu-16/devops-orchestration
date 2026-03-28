@@ -1,4 +1,3 @@
-OK: replaced successfully
 # pipeline_detail.py
 # Per-pipeline detail endpoints:
 # GET /pipelines/{id}/overview   — stats summary
@@ -299,14 +298,14 @@ def get_pipeline_healing(
         },
         "events": [
             {
-                "id":            e.id,
-                "run_id":        e.run_id,
-                "action":        e.action.value if hasattr(e.action, "value") else e.action,
-                "reason":        e.reason,
-                "succeeded":     e.result == "retry_succeeded",
-                "retry_count":   e.retry_number,
-                "result":        e.result,
-                "created_at":    e.created_at,
+                "id":          e.id,
+                "run_id":      e.run_id,
+                "action":      e.action.value if hasattr(e.action, "value") else e.action,
+                "reason":      e.reason,
+                "succeeded":   e.result == "retry_succeeded",
+                "retry_count": e.retry_number,
+                "result":      e.result,
+                "created_at":  e.created_at,
             }
             for e in events
         ],
