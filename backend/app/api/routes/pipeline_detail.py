@@ -1,3 +1,4 @@
+OK: replaced successfully
 # pipeline_detail.py
 # Per-pipeline detail endpoints:
 # GET /pipelines/{id}/overview   — stats summary
@@ -285,7 +286,7 @@ def get_pipeline_healing(
 
     total     = len(events)
     succeeded = sum(1 for e in events if e.result == "retry_succeeded")
-    failed_h  = total - succeeded
+    failed_h  = sum(1 for e in events if e.result == "retry_failed")
 
     return {
         "pipeline_id":   pipeline_id,
@@ -304,6 +305,7 @@ def get_pipeline_healing(
                 "reason":        e.reason,
                 "succeeded":     e.result == "retry_succeeded",
                 "retry_count":   e.retry_number,
+                "result":        e.result,
                 "created_at":    e.created_at,
             }
             for e in events
@@ -377,18 +379,14 @@ def get_pipeline_ml(
             for f in assessment.factors
         ],
         "recommendations": [
-    {
-        "priority":    r.priority,
-        "title":       r.title,
-        "description": r.description,
-        "action":      r.action_steps[0] if r.action_steps else "",
-        "action_steps": r.action_steps,
-        "effort":      r.effort,
-        "impact":      r.impact,
-        "category":    r.category,
-    }
-    for r in (recs.recommendations[:3] if recs else [])
-],
+            {
+                "priority":    r.priority,
+                "title":       r.title,
+                "description": r.description,
+                "action":      r.action,
+            }
+            for r in (recs[:3] if recs else [])
+        ],
         "risk_trend": risk_trend,
     }
 
@@ -493,7 +491,3 @@ def remove_pipeline_member(
     ).delete()
     db.commit()
     return {"status": "removed"}
-
-
-
-
