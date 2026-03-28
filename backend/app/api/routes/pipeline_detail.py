@@ -1,3 +1,4 @@
+# cache-bust: 20260328192737
 # pipeline_detail.py
 # Per-pipeline detail endpoints:
 # GET /pipelines/{id}/overview   — stats summary
@@ -210,3 +211,4 @@ def remove_pipeline_member(pipeline_id: int, user_id: int, db: Session = Depends
     db.query(PipelineMember).filter(PipelineMember.pipeline_id == pipeline_id, PipelineMember.user_id == user_id).delete()
     db.commit()
     return {"status": "removed"}# healed
+
