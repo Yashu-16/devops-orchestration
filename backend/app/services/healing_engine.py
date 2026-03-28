@@ -39,18 +39,19 @@ logger = logging.getLogger(__name__)
 # — they need a human to fix the underlying issue.
 
 RETRYABLE_CATEGORIES = {
-    "infrastructure",   # Connection timeouts, service unavailable
-    "unknown",          # We're not sure — one retry is safe
-    "source_control",   # Git clone failures are often transient
+    "infrastructure",
+    "unknown",
+    "source_control",
+    "test_failure",
+    "dependency",
+    "timeout",
 }
 
 NON_RETRYABLE_CATEGORIES = {
-    "test_failure",     # Tests fail for a reason — fix the code
-    "build_failure",    # Build errors need a code fix
-    "code_quality",     # Lint errors need a code fix
-    "deployment",       # Deployment failures need investigation
-    "authentication",   # Auth failures need secret rotation
-    "dependency",       # Dependency conflicts need manual resolution
+    "build_failure",
+    "code_quality",
+    "deployment",
+    "authentication",
 }
 
 
