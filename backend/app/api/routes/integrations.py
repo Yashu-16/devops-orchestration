@@ -21,7 +21,14 @@ from app.schemas.pipeline import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-BASE_URL = "http://localhost:8000"
+import os
+BASE_URL = os.environ.get(
+    "PUBLIC_BACKEND_URL",
+    os.environ.get("RAILWAY_PUBLIC_DOMAIN", "http://localhost:8000")
+)
+# Ensure https for Railway
+if BASE_URL and not BASE_URL.startswith("http"):
+    BASE_URL = f"https://{BASE_URL}"
 
 
 # ── Integration Management (authenticated) ────────────────────────
