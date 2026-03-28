@@ -348,9 +348,9 @@ export default function PipelineDetailPage() {
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                              e.succeeded ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"
+                              e.result === "retry_succeeded" ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"
                             }`}>
-                              {e.succeeded ? "✓ Healed" : "✗ Failed"}
+                              {e.result === "retry_succeeded" ? "✓ Healed" : "✗ Failed"}
                             </span>
                             <span className="text-xs text-gray-500">Run #{e.run_id}</span>
                           </div>
@@ -359,7 +359,7 @@ export default function PipelineDetailPage() {
                         </div>
                         <div className="text-right flex-shrink-0">
                           <p className="text-xs text-gray-600">{new Date(e.created_at).toLocaleString()}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">{e.retry_count} retries</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{e.retry_number} retries</p>
                         </div>
                       </div>
                     ))}
