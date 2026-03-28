@@ -38,16 +38,13 @@ export default function LoginPage() {
     const apiBase = getApiBase();
 
     try {
-      if (mode === "signup") {
-        const res = await axios.post(
-          `${apiBase}/api/v1/auth/signup`,
-          {
-            email:    form.email.trim(),
-            password: form.password,
-            name:     form.name.trim(),
-            org_name: form.org_name.trim(),
-          }
-        );
+    if (mode === "signup") {
+      const res = await axios.post("/api/v1/auth/signup", {
+        email:    form.email.trim(),
+        password: form.password,
+        name:     form.name.trim(),
+        org_name: form.org_name.trim(),
+      });
         localStorage.setItem("token", res.data.access_token);
         localStorage.setItem("user",  JSON.stringify(res.data.user));
         localStorage.setItem("org",   JSON.stringify(res.data.organization));
