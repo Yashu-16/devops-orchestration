@@ -1,28 +1,30 @@
 import axios from "axios";
 
-function getApiBase(): string {
+// Gets backend URL at request time from config.js
+// config.js sets window.__API_URL__ = "https://your-backend.railway.app"
+function getBackendUrl(): string {
   if (typeof window !== "undefined") {
     const w = window as any;
-    if (w.__API_URL__) return `${w.__API_URL__}/api/v1`;
+    if (w.__API_URL__) return w.__API_URL__;
   }
-  return "http://localhost:8000/api/v1";
+  return "http://localhost:8000";
 }
 
 const api = axios.create({
-  baseURL: getApiBase(),
   headers: { "Content-Type": "application/json" },
 });
 
+// Set correct baseURL and token on EVERY request
 api.interceptors.request.use(config => {
+  config.baseURL = `${getBackendUrl()}/api/v1`;
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
-    const w = window as any;
-    if (w.__API_URL__) config.baseURL = `${w.__API_URL__}/api/v1`;
   }
   return config;
 });
 
+// Redirect to login on 401
 api.interceptors.response.use(
   response => response,
   error => {
@@ -37,6 +39,8 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ── Types ─────────────────────────────────────────────────────────
 
 export interface Pipeline {
   id: number; name: string; description: string;
@@ -103,6 +107,8 @@ export interface HealingLog {
   reason: string; result: string | null;
   failure_category: string | null; created_at: string;
 }
+
+// ── API Functions ─────────────────────────────────────────────────
 
 export const getPipelines     = () => api.get<Pipeline[]>("/pipelines").then(r => r.data);
 export const createPipeline   = (data: any) => api.post<Pipeline>("/pipelines", data).then(r => r.data);
