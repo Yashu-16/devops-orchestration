@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import AuthWrapper from "@/components/AuthWrapper";
+import Script from "next/script";
 
 const geist = Geist({ subsets: ["latin"] });
 
@@ -17,11 +18,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
-        {/* Runtime config — loads API URL without needing a rebuild */}
-        <script src="/config.js" />
-      </head>
       <body className={`${geist.className} bg-gray-950 text-white`}>
+        {/* Load config BEFORE everything else - sets window.__API_URL__ */}
+        <Script src="/config.js" strategy="beforeInteractive" />
         <AuthWrapper>{children}</AuthWrapper>
       </body>
     </html>
