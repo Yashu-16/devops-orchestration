@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
@@ -31,12 +32,33 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS — must be registered FIRST ──────────────────────────────
+
+# ── Manual CORS middleware — handles OPTIONS preflight ────────────
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    # Handle preflight OPTIONS request
+    if request.method == "OPTIONS":
+        response = Response()
+        response.headers["Access-Control-Allow-Origin"]  = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Max-Age"]       = "86400"
+        return response
+
+    # Handle all other requests
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"]  = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+
+# ── Standard CORS middleware as backup ────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
