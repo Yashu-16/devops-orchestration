@@ -17,7 +17,7 @@ interface Notification {
 interface Prefs {
   email_enabled: boolean;
   slack_enabled: boolean;
-  in_app_enabled: boolean;
+  inapp_enabled: boolean;
   notify_on_failure: boolean;
   notify_on_success: boolean;
   notify_on_healing: boolean;
@@ -72,7 +72,7 @@ export default function NotificationsPage() {
     setSaving(true);
     setSaved(false);
     try {
-      await axios.put(`${B}/api/v1/notifications/preferences`, prefs, { headers: H });
+      await axios.patch(`${B}/api/v1/notifications/preferences`, prefs, { headers: H });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) { console.error("savePrefs error:", e); }
@@ -202,7 +202,7 @@ export default function NotificationsPage() {
               </h3>
               <div className="space-y-3">
                 {[
-                  { key: "in_app_enabled", label: "In-App Notifications", desc: "Show notifications in the bell icon" },
+                  { key: "inapp_enabled", label: "In-App Notifications", desc: "Show notifications in the bell icon" },
                   { key: "email_enabled",  label: "Email Notifications",  desc: "Send email alerts (requires SendGrid)" },
                   { key: "slack_enabled",  label: "Slack Notifications",  desc: "Send alerts to Slack channel" },
                 ].map(({ key, label, desc }) => (
