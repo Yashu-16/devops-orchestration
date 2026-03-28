@@ -19,3 +19,4 @@ RUN mkdir -p app/ml/saved_models
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Cache bust: 2026-03-28-01-15

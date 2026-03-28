@@ -1,1 +1,1 @@
-window.__API_URL__ = "https://zoological-wholeness-production.up.railway.app";
+window.__API_URL__ = "https://devops-orchestration-production.up.railway.app";
