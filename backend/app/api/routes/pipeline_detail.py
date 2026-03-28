@@ -377,14 +377,18 @@ def get_pipeline_ml(
             for f in assessment.factors
         ],
         "recommendations": [
-            {
-                "priority":    r.priority,
-                "title":       r.title,
-                "description": r.description,
-                "action":      r.action,
-            }
-            for r in (recs.recommendations[:3] if recs else [])
-        ],
+    {
+        "priority":    r.priority,
+        "title":       r.title,
+        "description": r.description,
+        "action":      r.action_steps[0] if r.action_steps else "",
+        "action_steps": r.action_steps,
+        "effort":      r.effort,
+        "impact":      r.impact,
+        "category":    r.category,
+    }
+    for r in (recs.recommendations[:3] if recs else [])
+],
         "risk_trend": risk_trend,
     }
 
@@ -489,3 +493,4 @@ def remove_pipeline_member(
     ).delete()
     db.commit()
     return {"status": "removed"}
+
