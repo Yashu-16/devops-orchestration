@@ -68,7 +68,7 @@ export default function MLPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Status",    value: status?.model_trained ? "Trained ✅" : "Not Trained ❌", color: status?.model_trained ? "text-green-400" : "text-red-400" },
+          { label: "Status",    value: status?.is_trained ? "Trained ✅" : "Not Trained ❌", color: status?.is_trained ? "text-green-400" : "text-red-400" },
           { label: "Samples",   value: String(status?.training_samples ?? 0),                  color: "text-blue-400" },
           { label: "AUC Score", value: status?.auc_score ? `${(status.auc_score * 100).toFixed(1)}%` : "N/A", color: "text-purple-400" },
           { label: "Trained",   value: status?.last_trained ? new Date(status.last_trained).toLocaleDateString() : "Never", color: "text-yellow-400" },
@@ -105,7 +105,7 @@ export default function MLPage() {
         </div>
       )}
 
-      {!status?.model_trained && (
+      {!status?.is_trained && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center mt-6">
           <Brain className="w-12 h-12 text-gray-600 mx-auto mb-3" />
           <p className="text-gray-400 font-medium">No model trained yet</p>
