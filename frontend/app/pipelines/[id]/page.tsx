@@ -323,10 +323,10 @@ export default function PipelineDetailPage() {
             <div className="space-y-4">
               <div className="grid grid-cols-4 gap-4">
                 {[
-                  { label: "Total Events",  value: healing.summary.total },
-                  { label: "Succeeded",     value: healing.summary.succeeded, color: "text-green-400" },
-                  { label: "Failed",        value: healing.summary.failed, color: "text-red-400" },
-                  { label: "Success Rate",  value: `${healing.summary.success_rate}%`, color: "text-blue-400" },
+                  { label: "Total Events",  value: healing?.summary?.total ?? 0 },
+                  { label: "Succeeded",     value: healing?.summary?.succeeded ?? 0, color: "text-green-400" },
+                  { label: "Failed",        value: healing?.summary?.failed ?? 0, color: "text-red-400" },
+                  { label: "Success Rate",  value: `${healing?.summary?.success_rate ?? 0}%`, color: "text-blue-400" },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">{label}</p>
@@ -339,11 +339,11 @@ export default function PipelineDetailPage() {
                 <div className="px-5 py-4 border-b border-gray-800">
                   <h2 className="text-sm font-semibold text-white">Healing Events</h2>
                 </div>
-                {healing.events.length === 0 ? (
+                {(healing?.events?.length ?? 0) === 0 ? (
                   <div className="p-12 text-center text-gray-500 text-sm">No healing events yet</div>
                 ) : (
                   <div className="divide-y divide-gray-800">
-                    {healing.events.map((e: any) => (
+                    {(healing?.events ?? []).map((e: any) => (
                       <div key={e.id} className="px-5 py-4 flex items-center justify-between gap-4">
                         <div>
                           <div className="flex items-center gap-2 mb-1">
@@ -377,10 +377,10 @@ export default function PipelineDetailPage() {
                 <h2 className="text-sm font-semibold text-white mb-4">Current Risk Assessment</h2>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[
-                    { label: "Risk Score",  value: `${Math.round(ml.current_risk.score * 100)}%`, color: riskColor(ml.current_risk.score) },
-                    { label: "Risk Level",  value: ml.current_risk.level, color: riskColor(ml.current_risk.score) },
-                    { label: "Confidence",  value: `${Math.round(ml.current_risk.confidence * 100)}%` },
-                    { label: "Based On",    value: `${ml.current_risk.based_on_runs} runs` },
+                    { label: "Risk Score",  value: `${Math.round((ml?.current_risk?.score ?? 0) * 100)}%`, color: riskColor(ml?.current_risk?.score ?? 0) },
+                    { label: "Risk Level",  value: ml?.current_risk?.level ?? "unknown", color: riskColor(ml?.current_risk?.score ?? 0) },
+                    { label: "Confidence",  value: `${Math.round((ml?.current_risk?.confidence ?? 0) * 100)}%` },
+                    { label: "Based On",    value: `${ml?.current_risk?.based_on_runs ?? 0} runs` },
                   ].map(({ label, value, color }) => (
                     <div key={label} className="bg-gray-800 rounded-lg p-3 text-center">
                       <p className="text-xs text-gray-500 mb-1">{label}</p>
@@ -388,30 +388,30 @@ export default function PipelineDetailPage() {
                     </div>
                   ))}
                 </div>
-                {ml.current_risk.used_ml && (
+                {ml?.current_risk?.used_ml && (
                   <p className="text-xs text-blue-400 mt-3">✓ ML model active for this pipeline</p>
                 )}
               </div>
 
               {/* Risk factors */}
-              {ml.factors.length > 0 && (
+              {(ml?.factors?.length ?? 0) > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                   <h2 className="text-sm font-semibold text-white mb-4">Risk Factors</h2>
                   <div className="space-y-3">
-                    {ml.factors.map((f: any) => (
+                    {(ml?.factors ?? []).map((f: any) => (
                       <div key={f.name}>
                         <div className="flex items-center justify-between mb-1">
                           <div>
                             <span className="text-xs text-white">{f.name}</span>
                             <span className="text-xs text-gray-500 ml-2">{f.description}</span>
                           </div>
-                          <span className={`text-xs font-mono ${riskColor(f.score)}`}>
-                            {Math.round(f.score * 100)}%
+                          <span className={`text-xs font-mono ${riskColor(f.score ?? 0)}`}>
+                            {Math.round((f.score ?? 0) * 100)}%
                           </span>
                         </div>
                         <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
                           <div className="h-full bg-orange-500 rounded-full"
-                            style={{ width: `${f.score * 100}%` }}/>
+                            style={{ width: `${(f.score ?? 0) * 100}%` }}/>
                         </div>
                       </div>
                     ))}
@@ -420,7 +420,7 @@ export default function PipelineDetailPage() {
               )}
 
               {/* Risk trend */}
-              {ml.risk_trend.length > 0 && (
+              {(ml?.risk_trend?.length ?? 0) > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                   <h2 className="text-sm font-semibold text-white mb-4">Risk Score Trend (Last 10 Runs)</h2>
                   <ResponsiveContainer width="100%" height={160}>
@@ -438,11 +438,11 @@ export default function PipelineDetailPage() {
               )}
 
               {/* Recommendations */}
-              {ml.recommendations.length > 0 && (
+              {(ml?.recommendations?.length ?? 0) > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                   <h2 className="text-sm font-semibold text-white mb-4">Recommendations</h2>
                   <div className="space-y-3">
-                    {ml.recommendations.map((r: any, i: number) => (
+                    {(ml?.recommendations ?? []).map((r: any, i: number) => (
                       <div key={i} className="bg-gray-800 rounded-lg p-4">
                         <div className="flex items-center gap-2 mb-1">
                           <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
