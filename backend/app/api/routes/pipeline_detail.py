@@ -300,7 +300,7 @@ def get_pipeline_healing(
             {
                 "id":            e.id,
                 "run_id":        e.run_id,
-                "action":        e.action,
+                "action":        e.action.value if hasattr(e.action, "value") else e.action,
                 "reason":        e.reason,
                 "succeeded":     e.result == "retry_succeeded",
                 "retry_count":   e.retry_number,
@@ -493,4 +493,7 @@ def remove_pipeline_member(
     ).delete()
     db.commit()
     return {"status": "removed"}
+
+
+
 
