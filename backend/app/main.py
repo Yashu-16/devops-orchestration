@@ -31,25 +31,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS must be registered FIRST before any other middleware ─────
+# ── CORS — must be registered FIRST ──────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # ── Error handlers ────────────────────────────────────────────────
 register_error_handlers(app)
 
-# ── Routes — register each router ONCE ───────────────────────────
-app.include_router(auth.router,      prefix="/api/v1")
-app.include_router(pipelines.router, prefix="/api/v1")
-app.include_router(team.router,      prefix="/api/v1")
-app.include_router(integrations.router, prefix="/api/v1")
+# ── Routes ────────────────────────────────────────────────────────
+app.include_router(auth.router,          prefix="/api/v1")
+app.include_router(pipelines.router,     prefix="/api/v1")
+app.include_router(team.router,          prefix="/api/v1")
+app.include_router(integrations.router,  prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
-app.include_router(ml.router, prefix="/api/v1")
+app.include_router(ml.router,            prefix="/api/v1")
 
 
 @app.get("/health", tags=["System"])
