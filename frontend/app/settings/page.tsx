@@ -40,7 +40,7 @@ export default function SettingsPage() {
     setError(null);
     setSuccess(null);
     try {
-      await axios.post(`${B}/api/v1/team/invite`, inviteForm, { headers: H });
+      await axios.post(`${B}/api/v1/team/invites`, inviteForm, { headers: H });
       setSuccess(`Invitation sent to ${inviteForm.email}`);
       setInviteForm({ email: "", role: "member" });
       fetchAll();
