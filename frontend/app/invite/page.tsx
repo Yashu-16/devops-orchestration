@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
-import { Suspense } from "react";
+import { getBackend } from "@/lib/backend-url";
 
 interface InviteInfo {
   email: string;
@@ -17,11 +17,13 @@ function AcceptInviteContent() {
   const searchParams = useSearchParams();
   const token        = searchParams.get("token") || "";
 
-  const [invite, setInvite]   = useState<InviteInfo | null>(null);
+  const [invite,  setInvite]  = useState<InviteInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", password: "" });
+  const [saving,  setSaving]  = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
+  const [form,    setForm]    = useState({ name: "", password: "" });
+
+  const B = getBackend();
 
   useEffect(() => {
     if (!token) {
@@ -29,13 +31,15 @@ function AcceptInviteContent() {
       setLoading(false);
       return;
     }
-    axios.get(`/api/v1/team/invites/lookup/${token}`)
+
+    // ✅ Use getBackend() — NOT a relative URL
+    axios.get(`${B}/api/v1/team/invites/lookup/${token}`)
       .then(res => setInvite(res.data))
       .catch(err => setError(
         err.response?.data?.detail || "Invalid or expired invite link"
       ))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [token, B]);
 
   const handleAccept = async () => {
     if (!form.name.trim()) { setError("Please enter your name"); return; }
@@ -44,11 +48,13 @@ function AcceptInviteContent() {
     setSaving(true);
     setError(null);
     try {
-      const res = await axios.post("/api/v1/team/invites/accept", {
-        token:    token,
+      // ✅ Use getBackend() — NOT a relative URL
+      const res = await axios.post(`${B}/api/v1/team/invites/accept`, {
+        token,
         name:     form.name.trim(),
         password: form.password,
       });
+
       localStorage.setItem("token", res.data.access_token);
       localStorage.setItem("user",  JSON.stringify(res.data.user));
       localStorage.setItem("org",   JSON.stringify(res.data.organization));
@@ -60,13 +66,11 @@ function AcceptInviteContent() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
@@ -91,8 +95,10 @@ function AcceptInviteContent() {
               <div className="text-4xl mb-4">⚠️</div>
               <p className="text-red-400 font-medium mb-2">Invalid Invite</p>
               <p className="text-gray-500 text-sm mb-6">{error}</p>
-              <button onClick={() => router.push("/login")}
-                className="bg-blue-600 hover:bg-blue-700 text-sm px-6 py-2.5 rounded-lg">
+              <button
+                onClick={() => router.push("/login")}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-6 py-2.5 rounded-lg"
+              >
                 Go to Login
               </button>
             </div>
@@ -108,9 +114,9 @@ function AcceptInviteContent() {
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400 text-xs">Role</span>
                   <span className={`text-xs px-2 py-1 rounded-full font-medium capitalize ${
-                    invite.role === "owner" ? "bg-purple-900 text-purple-300 border border-purple-700" :
-                    invite.role === "admin" ? "bg-blue-900 text-blue-300 border border-blue-700" :
-                    "bg-gray-700 text-gray-300 border border-gray-600"
+                    invite.role === "owner" ? "bg-purple-900 text-purple-300" :
+                    invite.role === "admin" ? "bg-blue-900 text-blue-300" :
+                    "bg-gray-700 text-gray-300"
                   }`}>
                     {invite.role}
                   </span>
@@ -119,23 +125,35 @@ function AcceptInviteContent() {
                   <span className="text-gray-400 text-xs">Organization</span>
                   <span className="text-white text-sm font-medium">{invite.org_name}</span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400 text-xs">Expires</span>
+                  <span className="text-gray-400 text-xs">
+                    {new Date(invite.expires_at).toLocaleDateString()}
+                  </span>
+                </div>
               </div>
 
-              {/* Create account form */}
+              {/* Form */}
               <div>
                 <label className="text-xs text-gray-400 mb-1.5 block">Your Full Name</label>
-                <input type="text" placeholder="John Smith"
+                <input
+                  type="text"
+                  placeholder="John Smith"
                   value={form.name}
                   onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                />
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1.5 block">Create Password</label>
-                <input type="password" placeholder="Min 8 characters"
+                <input
+                  type="password"
+                  placeholder="Min 8 characters"
                   value={form.password}
                   onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
                   onKeyDown={e => e.key === "Enter" && handleAccept()}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                />
               </div>
 
               {error && (
@@ -144,14 +162,14 @@ function AcceptInviteContent() {
                 </div>
               )}
 
-              <button onClick={handleAccept} disabled={saving}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white font-medium py-2.5 rounded-lg text-sm">
+              <button
+                onClick={handleAccept}
+                disabled={saving}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white font-medium py-2.5 rounded-lg text-sm transition-colors"
+              >
                 {saving ? "Creating account..." : "Accept Invite & Join Team"}
               </button>
 
-              <p className="text-center text-xs text-gray-600">
-                Expires {new Date(invite.expires_at).toLocaleDateString()}
-              </p>
             </div>
           ) : null}
         </div>
