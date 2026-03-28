@@ -7,6 +7,7 @@ RUN npm ci
 
 COPY . .
 
+# These two lines are critical - they pass the variable into the build
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
