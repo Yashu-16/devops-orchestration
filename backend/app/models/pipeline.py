@@ -103,7 +103,7 @@ class PipelineMember(Base):
     __tablename__ = "pipeline_members"
 
     id          = Column(Integer, primary_key=True, index=True)
-    pipeline_id = Column(Integer, ForeignKey("pipelines.id"), nullable=False)
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False)
     user_id     = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at  = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -158,7 +158,7 @@ class Notification(Base):
     read     = Column(Boolean, default=False)
 
     # Link back to the run that triggered this
-    pipeline_id = Column(Integer, ForeignKey("pipelines.id"), nullable=True)
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id", ondelete="SET NULL"), nullable=True)
     run_id      = Column(Integer, ForeignKey("pipeline_runs.id"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -222,7 +222,7 @@ class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
     id          = Column(Integer, primary_key=True, index=True)
-    pipeline_id = Column(Integer, ForeignKey("pipelines.id"), nullable=False)
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False)
 
     status       = Column(Enum(PipelineStatus), default=PipelineStatus.PENDING)
     triggered_by = Column(String(100), default="manual")
@@ -300,7 +300,7 @@ class HealingLog(Base):
     __tablename__ = "healing_logs"
 
     id          = Column(Integer, primary_key=True, index=True)
-    pipeline_id = Column(Integer, ForeignKey("pipelines.id"), nullable=False)
+    pipeline_id = Column(Integer, ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False)
     run_id      = Column(Integer, nullable=False)   # The run that triggered healing
 
     # What happened
@@ -323,3 +323,4 @@ class HealingLog(Base):
             f"<HealingLog id={self.id} "
             f"action={self.action} run={self.run_id}>"
         )
+
