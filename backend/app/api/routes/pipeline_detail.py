@@ -1,13 +1,6 @@
-# cache-bust: 20260328192737
+# cache-bust: 20260401000000
 # pipeline_detail.py
-# Per-pipeline detail endpoints:
-# GET /pipelines/{id}/overview   — stats summary
-# GET /pipelines/{id}/runs       — run history for this pipeline only
-# GET /pipelines/{id}/analytics  — charts data for this pipeline only
-# GET /pipelines/{id}/healing    — healing events for this pipeline only
-# GET /pipelines/{id}/ml         — ML prediction for this pipeline only
-# GET /pipelines/{id}/members    — who has access to this pipeline
-# POST /pipelines/{id}/members   — assign a member to this pipeline
+# Per-pipeline detail endpoints
 
 import logging
 from typing import List, Optional
@@ -142,11 +135,32 @@ def get_pipeline_healing(pipeline_id: int, db: Session = Depends(get_db), curren
         "pipeline_id": pipeline_id, "pipeline_name": pipeline.name,
         "summary": {"total": total, "succeeded": succeeded, "failed": failed_h,
                     "success_rate": round(succeeded / total * 100, 1) if total > 0 else 0},
-        "events": [{"id": e.id, "run_id": e.run_id,
-                    "action": e.action.value if hasattr(e.action, "value") else e.action,
-                    "reason": e.reason, "succeeded": e.result == "retry_succeeded",
-                    "retry_count": e.retry_number, "result": e.result, "created_at": e.created_at}
-                   for e in events],
+        "events": [
+            {
+                # Core healing fields
+                "id":           e.id,
+                "run_id":       e.run_id,
+                "action":       e.action.value if hasattr(e.action, "value") else e.action,
+                "reason":       e.reason,
+                "result":       e.result,
+                "retry_number": e.retry_number,
+                "succeeded":    e.result == "retry_succeeded",
+                "created_at":   e.created_at,
+
+                # AI Agent analysis fields
+                "agent_analysed":       getattr(e, "agent_analysed", False) or False,
+                "agent_summary":        getattr(e, "agent_summary", "") or "",
+                "agent_root_cause":     getattr(e, "agent_root_cause", "") or "",
+                "agent_proposed_fix":   getattr(e, "agent_proposed_fix", "") or "",
+                "agent_fix_type":       getattr(e, "agent_fix_type", "") or "",
+                "agent_affected_file":  getattr(e, "agent_affected_file", "") or "",
+                "agent_fix_code":       getattr(e, "agent_fix_code", "") or "",
+                "agent_confidence":     getattr(e, "agent_confidence", "") or "",
+                "agent_fix_time":       getattr(e, "agent_fix_time", "") or "",
+                "agent_can_auto_apply": getattr(e, "agent_can_auto_apply", False) or False,
+            }
+            for e in events
+        ],
     }
 
 
@@ -210,5 +224,4 @@ def remove_pipeline_member(pipeline_id: int, user_id: int, db: Session = Depends
         raise HTTPException(status_code=403, detail="Only admins and owners can remove members")
     db.query(PipelineMember).filter(PipelineMember.pipeline_id == pipeline_id, PipelineMember.user_id == user_id).delete()
     db.commit()
-    return {"status": "removed"}# healed
-
+    return {"status": "removed"}
