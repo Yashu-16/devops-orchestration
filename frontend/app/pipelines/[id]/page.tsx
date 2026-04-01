@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -322,12 +321,14 @@ export default function PipelineDetailPage() {
           {/* ── HEALING TAB ──────────────────────────────────────── */}
           {tab === "healing" && healing && (
             <div className="space-y-4">
+
+              {/* Summary stats */}
               <div className="grid grid-cols-4 gap-4">
                 {[
                   { label: "Total Events",  value: healing?.summary?.total ?? 0 },
-                  { label: "Succeeded",     value: healing?.summary?.succeeded ?? 0, color: "text-green-400" },
-                  { label: "Failed",        value: healing?.summary?.failed ?? 0, color: "text-red-400" },
-                  { label: "Success Rate",  value: `${healing?.summary?.success_rate ?? 0}%`, color: "text-blue-400" },
+                  { label: "Auto-Healed",   value: healing?.summary?.succeeded ?? 0, color: "text-green-400" },
+                  { label: "Not Healed",    value: healing?.summary?.failed ?? 0, color: "text-red-400" },
+                  { label: "Heal Rate",     value: `${healing?.summary?.success_rate ?? 0}%`, color: "text-blue-400" },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">{label}</p>
@@ -336,91 +337,141 @@ export default function PipelineDetailPage() {
                 ))}
               </div>
 
+              {/* Legend */}
+              <div className="flex items-center gap-6 px-1 text-xs text-gray-500">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500"></span>Auto-healed — system retried and it passed</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500"></span>Retry failed — still needs attention</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-500"></span>Rollback / Alert — human action needed</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-500"></span>AI analysis available</span>
+              </div>
+
+              {/* Events list */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-white">Healing Events</h2>
-                  <span className="text-xs text-purple-400 bg-purple-900/40 px-2 py-1 rounded-full">AI Agent Active</span>
+                  <div>
+                    <h2 className="text-sm font-semibold text-white">Healing Events</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Every action the system took when a pipeline failed</p>
+                  </div>
+                  <span className="text-xs text-purple-400 bg-purple-900/30 border border-purple-800/50 px-3 py-1 rounded-full">
+                    🤖 AI Agent Active
+                  </span>
                 </div>
+
                 {(healing?.events?.length ?? 0) === 0 ? (
-                  <div className="p-12 text-center text-gray-500 text-sm">No healing events yet</div>
+                  <div className="p-12 text-center">
+                    <p className="text-gray-400 text-sm font-medium">No healing events yet</p>
+                    <p className="text-gray-600 text-xs mt-1">Events appear here when a pipeline fails and the system takes action</p>
+                  </div>
                 ) : (
                   <div className="divide-y divide-gray-800">
                     {(healing?.events ?? []).map((e: any) => (
-                      <div key={e.id} className="px-5 py-4 space-y-3">
-                        {/* Header row */}
-                        <div className="flex items-center justify-between gap-4">
+                      <div key={e.id} className="px-5 py-5 space-y-3">
+
+                        {/* ── Row 1: Status + Run info + Timestamp ── */}
+                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                              e.result === "retry_succeeded" ? "bg-green-900 text-green-300" :
-                              e.result === "retry_failed"    ? "bg-red-900 text-red-300" :
-                              "bg-gray-800 text-gray-400"
+                            {/* Status badge */}
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                              e.result === "retry_succeeded"
+                                ? "bg-green-900 text-green-300 border border-green-700"
+                                : e.result === "retry_failed"
+                                ? "bg-red-900 text-red-300 border border-red-700"
+                                : "bg-gray-800 text-gray-400 border border-gray-700"
                             }`}>
-                              {e.result === "retry_succeeded" ? "✓ Healed" :
-                               e.result === "retry_failed"    ? "✗ Retry failed" : "● " + (e.result || "pending")}
+                              {e.result === "retry_succeeded" ? "✓ Auto-Healed" :
+                               e.result === "retry_failed"    ? "✗ Retry Failed" :
+                               e.action === "rollback"        ? "⟳ Rolled Back" :
+                               "● " + (e.action || "Alert")}
                             </span>
-                            <span className="text-xs text-gray-500">Run #{e.run_id}</span>
-                            <span className="text-xs text-gray-600 capitalize">{e.action}</span>
+                            <span className="text-xs text-gray-400">Run #{e.run_id}</span>
+                            {e.retry_number > 0 && (
+                              <span className="text-xs text-gray-600">Attempt {e.retry_number}</span>
+                            )}
                           </div>
-                          <p className="text-xs text-gray-600">{new Date(e.created_at).toLocaleString()}</p>
+                          <span className="text-xs text-gray-600">{new Date(e.created_at).toLocaleString()}</span>
                         </div>
 
-                        {/* Engine decision */}
-                        <p className="text-xs text-gray-500">{e.reason}</p>
+                        {/* ── Row 2: What the system did ── */}
+                        <div className="bg-gray-800/50 rounded-lg px-4 py-3">
+                          <p className="text-xs text-gray-400 font-medium mb-1">What the system did</p>
+                          <p className="text-sm text-gray-300">{e.reason}</p>
+                        </div>
 
-                        {/* AI Agent Analysis — shown when available */}
+                        {/* ── Row 3: AI Agent Analysis (shown only when available) ── */}
                         {e.agent_analysed && (
-                          <div className="bg-purple-950/40 border border-purple-800/50 rounded-lg p-4 space-y-3">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-xs font-bold text-purple-400">AI Agent Analysis</span>
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                e.agent_confidence === "high"   ? "bg-green-900 text-green-300" :
-                                e.agent_confidence === "medium" ? "bg-yellow-900 text-yellow-300" :
-                                "bg-gray-800 text-gray-400"
-                              }`}>{e.agent_confidence} confidence</span>
-                              <span className="text-xs text-gray-500">{e.agent_fix_time} to fix</span>
+                          <div className="border border-purple-800/40 bg-purple-950/20 rounded-xl overflow-hidden">
+
+                            {/* Agent header */}
+                            <div className="px-4 py-3 border-b border-purple-800/30 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm">🤖</span>
+                                <span className="text-sm font-semibold text-purple-300">AI Agent Diagnosis</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                                  e.agent_confidence === "high"
+                                    ? "bg-green-900/50 text-green-300 border-green-700"
+                                    : e.agent_confidence === "medium"
+                                    ? "bg-yellow-900/50 text-yellow-300 border-yellow-700"
+                                    : "bg-gray-800 text-gray-400 border-gray-700"
+                                }`}>
+                                  {e.agent_confidence === "high"   ? "High confidence" :
+                                   e.agent_confidence === "medium" ? "Medium confidence" :
+                                   "Low confidence"}
+                                </span>
+                                {e.agent_fix_time && (
+                                  <span className="text-xs text-gray-500">⏱ {e.agent_fix_time}</span>
+                                )}
+                              </div>
                             </div>
 
-                            {/* Summary */}
-                            <p className="text-sm text-white font-medium">{e.agent_summary}</p>
+                            <div className="p-4 space-y-4">
 
-                            {/* Root cause detail */}
-                            {e.agent_root_cause && (
-                              <p className="text-xs text-gray-400">{e.agent_root_cause}</p>
-                            )}
+                              {/* What went wrong */}
+                              {e.agent_summary && (
+                                <div>
+                                  <p className="text-xs font-semibold text-purple-400 uppercase tracking-wide mb-1">What went wrong</p>
+                                  <p className="text-sm text-white">{e.agent_summary}</p>
+                                </div>
+                              )}
 
-                            {/* Proposed fix */}
-                            {e.agent_proposed_fix && (
-                              <div className="bg-gray-900 rounded-lg p-3">
-                                <p className="text-xs text-purple-400 font-medium mb-1">Proposed Fix</p>
-                                <p className="text-xs text-gray-300">{e.agent_proposed_fix}</p>
-                              </div>
-                            )}
+                              {/* Why it happened */}
+                              {e.agent_root_cause && (
+                                <div>
+                                  <p className="text-xs font-semibold text-purple-400 uppercase tracking-wide mb-1">Why it happened</p>
+                                  <p className="text-sm text-gray-300">{e.agent_root_cause}</p>
+                                </div>
+                              )}
 
-                            {/* Fix code block */}
-                            {e.agent_fix_code && (
-                              <div className="bg-gray-950 rounded-lg p-3">
-                                <p className="text-xs text-green-400 font-medium mb-2">
-                                  {e.agent_affected_file && `File: ${e.agent_affected_file}`}
-                                </p>
-                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">{e.agent_fix_code}</pre>
-                              </div>
-                            )}
+                              {/* How to fix it */}
+                              {e.agent_proposed_fix && (
+                                <div>
+                                  <p className="text-xs font-semibold text-green-400 uppercase tracking-wide mb-1">How to fix it</p>
+                                  <p className="text-sm text-gray-300">{e.agent_proposed_fix}</p>
+                                </div>
+                              )}
 
-                            {/* Plain English explanation */}
-                            {e.agent_explanation && (
-                              <p className="text-xs text-gray-500 italic border-t border-gray-800 pt-2">{e.agent_explanation}</p>
-                            )}
+                              {/* Exact fix — code block */}
+                              {e.agent_fix_code && (
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <p className="text-xs font-semibold text-green-400 uppercase tracking-wide">
+                                      Exact fix{e.agent_affected_file ? ` — ${e.agent_affected_file}` : ""}
+                                    </p>
+                                    {e.agent_can_auto_apply && (
+                                      <span className="text-xs bg-blue-900/50 text-blue-300 border border-blue-700 px-2 py-0.5 rounded-full">
+                                        ⚡ Simple fix — copy and paste this
+                                      </span>
+                                    )}
+                                  </div>
+                                  <pre className="bg-gray-950 border border-gray-700 rounded-lg p-3 text-xs text-green-300 overflow-x-auto whitespace-pre-wrap font-mono">{e.agent_fix_code}</pre>
+                                </div>
+                              )}
 
-                            {/* Auto-apply badge */}
-                            {e.agent_can_auto_apply && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded-full">
-                                  ⚡ Auto-apply available in Phase 2
-                                </span>
-                              </div>
-                            )}
+                            </div>
                           </div>
                         )}
+
                       </div>
                     ))}
                   </div>

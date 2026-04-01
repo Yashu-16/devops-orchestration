@@ -1,139 +1,105 @@
 # healing_agent.py
-# AI-powered healing agent — Phase 1
-#
-# When a pipeline fails with P1 or P2 priority:
-# 1. Reads the actual error logs and root cause
-# 2. Fetches relevant source files from GitHub (if connected)
-# 3. Calls Claude API to diagnose the error
-# 4. Generates a specific, actionable fix
-# 5. Stores the analysis in the HealingLog
-#
-# The fix is shown in the Healing tab — one click to apply (Phase 2)
+# AI Healing Agent — reads pipeline errors and proposes exact fixes using Claude AI
 
+import os
 import logging
 import json
 import re
+import base64
 import requests
 from typing import Optional
 from sqlalchemy.orm import Session
 
-from app.models.pipeline import (
-    Pipeline, PipelineRun, HealingLog, Integration
-)
+from app.models.pipeline import Pipeline, PipelineRun, HealingLog, Integration
 
 logger = logging.getLogger(__name__)
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL   = "claude-sonnet-4-20250514"
 
-# Priority levels that trigger the agent
-AGENT_PRIORITIES = {"P1", "P2"}
-
-# Failure categories the agent can realistically fix
-FIXABLE_CATEGORIES = {
-    "dependency",
-    "dependency_error",
-    "test_failure",
-    "config_error",
-    "timeout",
-    "infrastructure",
-    "unknown",
-}
-
 
 class HealingAgent:
     """
-    AI agent that analyses pipeline failures and proposes specific fixes.
-    Uses Claude to read error logs and source code, then generates
-    a human-readable diagnosis and a concrete code fix.
+    AI agent that reads a failed pipeline run, understands what went wrong,
+    and proposes a specific fix. Results are shown in the Healing tab.
     """
 
     def __init__(self, db: Session):
         self.db = db
 
-    def analyse_and_propose_fix(
-        self,
-        run: PipelineRun,
-        healing_log: HealingLog,
-        priority: str = "P1",
-    ) -> Optional[dict]:
+    def run(self, run: PipelineRun, healing_log: HealingLog) -> bool:
         """
-        Main entry point. Called after a failed run is classified.
-        Returns a dict with diagnosis and proposed fix, or None if skipped.
+        Main entry point.
+        Returns True if analysis was completed, False if skipped.
         """
-        if priority not in AGENT_PRIORITIES:
-            logger.info(f"Agent skipping run {run.id} — priority {priority} below threshold")
-            return None
+        # Check API key first — fail fast with clear log message
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            logger.warning(
+                f"[AI Agent] Skipped run {run.id} — "
+                f"ANTHROPIC_API_KEY not set in Railway Variables"
+            )
+            return False
 
-        failure_category = self._extract_category(run.root_cause)
-
+        failure_category = self._get_category(run.root_cause)
         logger.info(
-            f"AI Healing Agent activated: run={run.id} | "
-            f"priority={priority} | category={failure_category}"
+            f"[AI Agent] Starting analysis: run={run.id} | "
+            f"stage={run.failed_stage} | category={failure_category}"
         )
 
-        # Build context for Claude
+        # Step 1: Build error context from the run
         error_context = self._build_error_context(run)
 
-        # Fetch source files from GitHub if connected
-        source_context = self._fetch_source_context(run)
+        # Step 2: Try to fetch relevant source files from GitHub
+        source_context = self._fetch_github_files(run)
+        if source_context:
+            logger.info(f"[AI Agent] Fetched source files from GitHub for run {run.id}")
+        else:
+            logger.info(f"[AI Agent] No GitHub files fetched for run {run.id}")
 
-        # Call Claude API
-        analysis = self._call_claude(
-            error_context=error_context,
-            source_context=source_context,
-            priority=priority,
-            failure_category=failure_category,
-        )
+        # Step 3: Call Claude API
+        logger.info(f"[AI Agent] Calling Claude API for run {run.id}...")
+        analysis = self._call_claude(api_key, error_context, source_context, failure_category)
 
         if not analysis:
-            return None
+            logger.error(f"[AI Agent] No analysis returned for run {run.id}")
+            return False
 
-        # Store analysis in the healing log
-        self._store_analysis(healing_log, analysis)
-
+        # Step 4: Save to healing log
+        self._save(healing_log, analysis)
         logger.info(
-            f"Agent analysis complete for run {run.id}: "
-            f"confidence={analysis.get('confidence', 'unknown')}"
+            f"[AI Agent] Done for run {run.id} — "
+            f"confidence={analysis.get('confidence')} | "
+            f"fix_type={analysis.get('fix_type')}"
         )
-
-        return analysis
+        return True
 
     def _build_error_context(self, run: PipelineRun) -> str:
-        """Builds a clear error context string from the run data."""
         parts = []
-
-        parts.append(f"Pipeline: {run.pipeline_id}")
-        parts.append(f"Failed Stage: {run.failed_stage or 'unknown'}")
-        parts.append(f"Environment: {run.environment}")
+        parts.append(f"Failed stage: {run.failed_stage or 'unknown'}")
+        parts.append(f"Environment: {run.environment or 'unknown'}")
 
         if run.root_cause:
-            parts.append(f"Root Cause: {run.root_cause}")
+            parts.append(f"Root cause classification: {run.root_cause}")
 
         if run.error_message:
-            parts.append(f"Error Message:\n{run.error_message[:2000]}")
+            parts.append(f"Error message:\n{run.error_message[:2000]}")
 
         if run.logs:
-            # Get last 100 lines of logs where the error usually appears
-            log_lines = run.logs.strip().split('\n')
-            relevant_logs = '\n'.join(log_lines[-100:])
-            parts.append(f"Last 100 log lines:\n{relevant_logs[:3000]}")
+            lines = run.logs.strip().split('\n')
+            relevant = '\n'.join(lines[-80:])
+            parts.append(f"Pipeline logs (last 80 lines):\n{relevant[:3000]}")
 
-        # Add stage logs if available
         if run.stage_logs:
             for stage in run.stage_logs:
-                if stage.status == 'failed' and stage.logs:
-                    parts.append(
-                        f"Stage '{stage.name}' error:\n{stage.logs[:500]}"
-                    )
+                if hasattr(stage, 'passed') and not stage.passed:
+                    stage_log = getattr(stage, 'logs', None) or getattr(stage, 'error_message', None)
+                    if stage_log:
+                        parts.append(f"Stage '{stage.name}' output:\n{str(stage_log)[:500]}")
 
         return '\n\n'.join(parts)
 
-    def _fetch_source_context(self, run: PipelineRun) -> str:
-        """
-        Fetches relevant source files from GitHub if an integration exists.
-        Only fetches files likely related to the failure.
-        """
+    def _fetch_github_files(self, run: PipelineRun) -> str:
         pipeline = self.db.query(Pipeline).filter(
             Pipeline.id == run.pipeline_id
         ).first()
@@ -141,7 +107,6 @@ class HealingAgent:
         if not pipeline or not pipeline.repository:
             return ""
 
-        # Look for a GitHub integration with an access token
         integration = self.db.query(Integration).filter(
             Integration.organization_id == pipeline.organization_id,
             Integration.platform == "github",
@@ -151,126 +116,91 @@ class HealingAgent:
         if not integration or not integration.access_token:
             return ""
 
-        try:
-            # Extract owner/repo from repository URL
-            # e.g. https://github.com/Yashu-16/DevOps-testing.git
-            match = re.search(r'github\.com[/:](.+?)(?:\.git)?$', pipeline.repository)
-            if not match:
-                return ""
+        match = re.search(r'github\.com[/:](.+?)(?:\.git)?$', pipeline.repository)
+        if not match:
+            return ""
 
-            repo_path = match.group(1)
-            headers = {
-                "Authorization": f"token {integration.access_token}",
-                "Accept": "application/vnd.github.v3+json",
-            }
+        repo_path = match.group(1)
+        headers = {
+            "Authorization": f"token {integration.access_token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
 
-            # Decide which files to fetch based on failure category
-            files_to_fetch = self._decide_files_to_fetch(run)
-            source_parts = []
+        files_to_fetch = self._pick_files(run)
+        fetched = []
 
-            for filepath in files_to_fetch[:5]:  # max 5 files
+        for filepath in files_to_fetch[:4]:
+            try:
                 url = f"https://api.github.com/repos/{repo_path}/contents/{filepath}"
-                resp = requests.get(url, headers=headers, timeout=10)
+                resp = requests.get(url, headers=headers, timeout=8)
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get('encoding') == 'base64':
-                        import base64
                         content = base64.b64decode(data['content']).decode('utf-8', errors='replace')
-                        source_parts.append(f"File: {filepath}\n```\n{content[:2000]}\n```")
+                        fetched.append(f"=== {filepath} ===\n{content[:1500]}")
+            except Exception as e:
+                logger.warning(f"[AI Agent] Could not fetch {filepath}: {e}")
 
-            return '\n\n'.join(source_parts)
+        return '\n\n'.join(fetched)
 
-        except Exception as e:
-            logger.warning(f"Could not fetch source context: {e}")
-            return ""
+    def _pick_files(self, run: PipelineRun) -> list:
+        category = self._get_category(run.root_cause)
+        stage    = (run.failed_stage or "").lower()
 
-    def _decide_files_to_fetch(self, run: PipelineRun) -> list:
-        """Decides which source files to fetch based on the failure."""
-        category = self._extract_category(run.root_cause)
-        stage = run.failed_stage or ""
-
-        files = []
-
-        if category in ("dependency", "dependency_error"):
-            files = ["requirements.txt", "package.json", "Pipfile", "pyproject.toml"]
+        if category in ("dependency", "dependency_error") or "install" in stage:
+            return ["requirements.txt", "package.json", "Pipfile"]
+        elif category == "test_failure" or "test" in stage:
+            return ["test_app.py", "tests/test_app.py", "pytest.ini", "requirements.txt"]
         elif category == "config_error":
-            files = [".env.example", "config.py", "settings.py", "docker-compose.yml"]
-        elif category == "test_failure":
-            # Try to get the specific test file from the error
-            if run.error_message:
-                match = re.search(r'(test_\w+\.py|spec/\w+)', run.error_message)
-                if match:
-                    files = [match.group(1)]
-            files = files or ["tests/", "test_app.py", "pytest.ini"]
-        elif "install" in stage.lower():
-            files = ["requirements.txt", "package.json"]
-        elif "lint" in stage.lower():
-            files = [".flake8", ".eslintrc", "pyproject.toml"]
+            return ["config.py", "settings.py", ".env.example"]
+        elif "lint" in stage or "build" in stage:
+            return ["requirements.txt", "package.json", "Dockerfile"]
         else:
-            files = ["requirements.txt", "package.json", "Dockerfile"]
+            return ["requirements.txt", "package.json"]
 
-        return files
+    def _call_claude(self, api_key, error_context, source_context, failure_category):
+        system_prompt = """You are an expert DevOps engineer helping a team fix a CI/CD pipeline failure.
 
-    def _call_claude(
-        self,
-        error_context: str,
-        source_context: str,
-        priority: str,
-        failure_category: str,
-    ) -> Optional[dict]:
-        """Calls Claude API to analyse the error and propose a fix."""
-        import os
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+Your job:
+1. Read the error logs carefully
+2. Identify the exact root cause
+3. Provide a specific, actionable fix
 
-        if not api_key:
-            logger.warning("ANTHROPIC_API_KEY not set — agent skipped")
-            return None
+Respond with ONLY a JSON object — no text before or after it, no markdown code blocks.
 
-        system_prompt = """You are an expert DevOps AI agent. Your job is to analyse CI/CD pipeline failures and propose specific, actionable fixes.
-
-You will be given:
-- The error logs from a failed pipeline run
-- The priority level (P1 = critical, P2 = important)
-- The failure category
-- Relevant source code files (if available)
-
-You must respond with a JSON object only — no markdown, no explanation outside the JSON.
-
-The JSON must have exactly these fields:
+JSON fields required:
 {
-  "summary": "One sentence: what went wrong",
-  "root_cause_detail": "2-3 sentences: exactly why this failed",
-  "proposed_fix": "The specific fix — exact code or command to run",
-  "fix_type": "code_change | config_change | command | dependency_update",
-  "affected_file": "The file that needs to change (or null)",
-  "fix_code": "The exact code/content to put in the file (or null if not a code fix)",
-  "confidence": "high | medium | low",
-  "estimated_fix_time": "2 min | 5 min | 15 min | 30 min",
-  "can_auto_apply": true or false,
-  "explanation_for_engineer": "Plain English explanation any engineer can understand"
+  "what_went_wrong": "One clear sentence explaining what failed and why",
+  "why_it_happened": "2-3 sentences explaining the technical root cause in plain English",
+  "how_to_fix": "Step-by-step instructions to fix this — be specific, not generic",
+  "fix_type": "one of: add_dependency | fix_code | fix_config | run_command | manual_review",
+  "affected_file": "exact filename that needs to change, or null",
+  "exact_fix": "the exact code, command, or content change needed — copy-paste ready, or null",
+  "confidence": "one of: high | medium | low",
+  "time_to_fix": "one of: 2 minutes | 5 minutes | 15 minutes | 30+ minutes",
+  "can_auto_fix": true if this is a simple dependency or config fix, false otherwise
 }
 
-Rules:
-- Be specific. Never say 'check your configuration'. Say exactly what to change.
-- If you can see the source file, reference the exact line number.
-- can_auto_apply is true only for dependency additions and simple config changes.
-- If you cannot determine the fix with confidence, set confidence to 'low' and explain why."""
+Be specific. If you see 'ModuleNotFoundError: No module named requests', say exactly:
+- affected_file: requirements.txt
+- exact_fix: requests==2.31.0
+- how_to_fix: Add 'requests==2.31.0' to requirements.txt and push the change
 
-        user_message = f"""Pipeline failure analysis request.
+Never say 'check your configuration' or 'review your code'. Always say exactly what to change."""
 
-Priority: {priority}
-Failure Category: {failure_category}
+        source_section = f"\n\nSOURCE FILES FROM GITHUB:\n{source_context}" if source_context else ""
 
-ERROR CONTEXT:
-{error_context}
+        user_message = f"""Please analyse this pipeline failure.
 
-{"SOURCE CODE:" if source_context else ""}
-{source_context}
+FAILURE CATEGORY: {failure_category}
 
-Analyse this failure and provide a specific fix."""
+ERROR DETAILS:
+{error_context}{source_section}
+
+Provide your analysis as a JSON object."""
 
         try:
-            response = requests.post(
+            resp = requests.post(
                 CLAUDE_API_URL,
                 headers={
                     "Content-Type": "application/json",
@@ -281,56 +211,49 @@ Analyse this failure and provide a specific fix."""
                     "model": CLAUDE_MODEL,
                     "max_tokens": 1024,
                     "system": system_prompt,
-                    "messages": [
-                        {"role": "user", "content": user_message}
-                    ],
+                    "messages": [{"role": "user", "content": user_message}],
                 },
                 timeout=30,
             )
 
-            if response.status_code != 200:
-                logger.error(f"Claude API error: {response.status_code} — {response.text[:200]}")
+            if resp.status_code != 200:
+                logger.error(f"[AI Agent] Claude API error {resp.status_code}: {resp.text[:300]}")
                 return None
 
-            data = response.json()
-            content = data.get("content", [{}])[0].get("text", "")
-
-            # Parse JSON response
-            # Strip any accidental markdown fences
-            content = re.sub(r'```json\s*|\s*```', '', content).strip()
-            analysis = json.loads(content)
-
-            return analysis
+            raw = resp.json().get("content", [{}])[0].get("text", "")
+            raw = re.sub(r'^```(?:json)?\s*', '', raw.strip())
+            raw = re.sub(r'\s*```$', '', raw.strip())
+            return json.loads(raw)
 
         except json.JSONDecodeError as e:
-            logger.error(f"Claude returned invalid JSON: {e}")
+            logger.error(f"[AI Agent] Invalid JSON from Claude: {e}")
+            return None
+        except requests.Timeout:
+            logger.error(f"[AI Agent] Claude API timed out after 30s")
             return None
         except Exception as e:
-            logger.error(f"Claude API call failed: {e}")
+            logger.error(f"[AI Agent] Unexpected error: {e}")
             return None
 
-    def _store_analysis(self, healing_log: HealingLog, analysis: dict) -> None:
-        """Stores the agent's analysis in the healing log."""
+    def _save(self, healing_log: HealingLog, analysis: dict) -> None:
         try:
-            healing_log.agent_summary         = analysis.get("summary", "")
-            healing_log.agent_root_cause       = analysis.get("root_cause_detail", "")
-            healing_log.agent_proposed_fix     = analysis.get("proposed_fix", "")
-            healing_log.agent_fix_type         = analysis.get("fix_type", "")
-            healing_log.agent_affected_file    = analysis.get("affected_file", "")
-            healing_log.agent_fix_code         = analysis.get("fix_code", "")
-            healing_log.agent_confidence       = analysis.get("confidence", "low")
-            healing_log.agent_fix_time         = analysis.get("estimated_fix_time", "")
-            healing_log.agent_can_auto_apply   = analysis.get("can_auto_apply", False)
-            healing_log.agent_explanation      = analysis.get("explanation_for_engineer", "")
-            healing_log.agent_analysed         = True
-
+            healing_log.agent_analysed       = True
+            healing_log.agent_summary        = analysis.get("what_went_wrong", "")
+            healing_log.agent_root_cause     = analysis.get("why_it_happened", "")
+            healing_log.agent_proposed_fix   = analysis.get("how_to_fix", "")
+            healing_log.agent_fix_type       = analysis.get("fix_type", "")
+            healing_log.agent_affected_file  = analysis.get("affected_file") or ""
+            healing_log.agent_fix_code       = analysis.get("exact_fix") or ""
+            healing_log.agent_confidence     = analysis.get("confidence", "low")
+            healing_log.agent_fix_time       = analysis.get("time_to_fix", "")
+            healing_log.agent_can_auto_apply = analysis.get("can_auto_fix", False)
+            healing_log.agent_explanation    = analysis.get("how_to_fix", "")
             self.db.commit()
         except Exception as e:
-            logger.error(f"Failed to store agent analysis: {e}")
+            logger.error(f"[AI Agent] Failed to save: {e}")
             self.db.rollback()
 
-    def _extract_category(self, root_cause: str) -> str:
-        """Parses '[CATEGORY] explanation' format."""
+    def _get_category(self, root_cause: str) -> str:
         if not root_cause:
             return "unknown"
         if root_cause.startswith("[") and "]" in root_cause:

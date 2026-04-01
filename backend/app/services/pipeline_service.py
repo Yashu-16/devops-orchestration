@@ -330,91 +330,64 @@ class PipelineService:
     def _run_failure_analysis(self, run: PipelineRun) -> None:
         """
         Called automatically after every failed run.
-        Phase 4: Failure classification
-        Phase 6: Recommendations
-        Phase 7: Self-healing
-        Phase AI: Healing agent analysis (NEW)
+        Runs: classification → recommendations → healing → AI agent
         """
         from app.services.failure_analysis import FailureAnalysisEngine
         from app.services.recommendation_engine import RecommendationEngine
         from app.services.healing_engine import SelfHealingEngine
         from app.services.healing_agent import HealingAgent
  
-        # ── Phase 4: Classify the failure ─────────────────────────
+        # 1. Classify the failure
         try:
             engine = FailureAnalysisEngine()
             result = engine.analyze(run)
             if result:
-                run.root_cause = (
-                    f"[{result.root_cause_category.upper()}] "
-                    f"{result.explanation}"
-                )
+                run.root_cause     = f"[{result.root_cause_category.upper()}] {result.explanation}"
                 run.recommendation = result.suggestion
                 self.db.commit()
-                logger.info(
-                    f"Failure analysis saved for run {run.id}: "
-                    f"{result.root_cause_category} "
-                    f"(confidence={result.confidence})"
-                )
+                logger.info(f"Failure classified for run {run.id}: {result.root_cause_category} (confidence={result.confidence})")
         except Exception as e:
             logger.error(f"Failure analysis error for run {run.id}: {e}")
  
-        # ── Phase 6: Generate recommendations ─────────────────────
+        # 2. Generate recommendations
         try:
             rec_engine = RecommendationEngine(self.db)
             report     = rec_engine.generate(run.pipeline_id, run_id=run.id)
-            logger.info(
-                f"Generated {report.total_count} recommendations "
-                f"({report.p1_count} P1) for pipeline {run.pipeline_id}"
-            )
+            logger.info(f"Generated {report.total_count} recommendations ({report.p1_count} P1) for pipeline {run.pipeline_id}")
         except Exception as e:
             logger.error(f"Recommendation error for run {run.id}: {e}")
  
-        # ── Phase 7: Self-healing evaluation ──────────────────────
+        # 3. Self-healing evaluation
         healing_log = None
         try:
             healing_engine = SelfHealingEngine(self.db)
             healing_log    = healing_engine.evaluate_and_heal(run)
             if healing_log:
-                logger.info(
-                    f"Healing action for run {run.id}: "
-                    f"{healing_log.action.value} — {healing_log.result}"
-                )
+                logger.info(f"Healing action for run {run.id}: {healing_log.action.value} — {healing_log.result}")
         except Exception as e:
             logger.error(f"Self-healing error for run {run.id}: {e}")
  
-        # ── Phase AI: Healing agent analysis ──────────────────────
-        # Determine priority from recommendation report
+        # 4. AI Agent analysis — runs on every failure, stores result in Healing tab
         try:
-            priority = "P2"  # default
-            try:
-                rec_engine = RecommendationEngine(self.db)
-                report     = rec_engine.generate(run.pipeline_id, run_id=run.id)
-                if report and report.p1_count > 0:
-                    priority = "P1"
-                elif report and report.total_count > 0:
-                    priority = "P2"
-                else:
-                    priority = "P3"
-            except Exception:
-                pass
- 
-            # Only run agent for P1 and P2
-            if priority in ("P1", "P2") and healing_log:
-                agent = HealingAgent(self.db)
-                analysis = agent.analyse_and_propose_fix(
-                    run=run,
-                    healing_log=healing_log,
-                    priority=priority,
+            if healing_log is None:
+                # Create a healing log entry so agent has somewhere to store results
+                from app.models.pipeline import HealingLog, HealingAction
+                healing_log = HealingLog(
+                    pipeline_id=run.pipeline_id,
+                    run_id=run.id,
+                    action=HealingAction.ALERT,
+                    reason="AI agent analysis only — no auto-healing action taken",
+                    result="analysed",
+                    retry_number=0,
                 )
-                if analysis:
-                    logger.info(
-                        f"AI Agent analysis complete for run {run.id}: "
-                        f"confidence={analysis.get('confidence', 'unknown')} | "
-                        f"fix_type={analysis.get('fix_type', 'unknown')}"
-                    )
-                else:
-                    logger.info(f"AI Agent skipped for run {run.id}")
+                self.db.add(healing_log)
+                self.db.commit()
  
+            agent = HealingAgent(self.db)
+            success = agent.run(run=run, healing_log=healing_log)
+            if success:
+                logger.info(f"AI Agent completed analysis for run {run.id}")
+            else:
+                logger.info(f"AI Agent skipped for run {run.id}")
         except Exception as e:
-            logger.error(f"AI Healing Agent error for run {run.id}: {e}")
+            logger.error(f"AI Agent error for run {run.id}: {e}")
