@@ -122,9 +122,9 @@ class HealingAgent:
         # Add stage logs if available
         if run.stage_logs:
             for stage in run.stage_logs:
-                if stage.status == 'failed' and stage.error_message:
+                if stage.status == 'failed' and stage.logs:
                     parts.append(
-                        f"Stage '{stage.name}' error:\n{stage.error_message[:500]}"
+                        f"Stage '{stage.name}' error:\n{stage.logs[:500]}"
                     )
 
         return '\n\n'.join(parts)
