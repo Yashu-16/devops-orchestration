@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -336,31 +337,90 @@ export default function PipelineDetailPage() {
               </div>
 
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-800">
+                <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-white">Healing Events</h2>
+                  <span className="text-xs text-purple-400 bg-purple-900/40 px-2 py-1 rounded-full">AI Agent Active</span>
                 </div>
                 {(healing?.events?.length ?? 0) === 0 ? (
                   <div className="p-12 text-center text-gray-500 text-sm">No healing events yet</div>
                 ) : (
                   <div className="divide-y divide-gray-800">
                     {(healing?.events ?? []).map((e: any) => (
-                      <div key={e.id} className="px-5 py-4 flex items-center justify-between gap-4">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
+                      <div key={e.id} className="px-5 py-4 space-y-3">
+                        {/* Header row */}
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-2">
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                              e.result === "retry_succeeded" ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"
+                              e.result === "retry_succeeded" ? "bg-green-900 text-green-300" :
+                              e.result === "retry_failed"    ? "bg-red-900 text-red-300" :
+                              "bg-gray-800 text-gray-400"
                             }`}>
-                              {e.result === "retry_succeeded" ? "✓ Healed" : "✗ Failed"}
+                              {e.result === "retry_succeeded" ? "✓ Healed" :
+                               e.result === "retry_failed"    ? "✗ Retry failed" : "● " + (e.result || "pending")}
                             </span>
                             <span className="text-xs text-gray-500">Run #{e.run_id}</span>
+                            <span className="text-xs text-gray-600 capitalize">{e.action}</span>
                           </div>
-                          <p className="text-sm text-white font-medium">{e.action}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">{e.reason}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
                           <p className="text-xs text-gray-600">{new Date(e.created_at).toLocaleString()}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">{e.retry_number} retries</p>
                         </div>
+
+                        {/* Engine decision */}
+                        <p className="text-xs text-gray-500">{e.reason}</p>
+
+                        {/* AI Agent Analysis — shown when available */}
+                        {e.agent_analysed && (
+                          <div className="bg-purple-950/40 border border-purple-800/50 rounded-lg p-4 space-y-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-bold text-purple-400">AI Agent Analysis</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                e.agent_confidence === "high"   ? "bg-green-900 text-green-300" :
+                                e.agent_confidence === "medium" ? "bg-yellow-900 text-yellow-300" :
+                                "bg-gray-800 text-gray-400"
+                              }`}>{e.agent_confidence} confidence</span>
+                              <span className="text-xs text-gray-500">{e.agent_fix_time} to fix</span>
+                            </div>
+
+                            {/* Summary */}
+                            <p className="text-sm text-white font-medium">{e.agent_summary}</p>
+
+                            {/* Root cause detail */}
+                            {e.agent_root_cause && (
+                              <p className="text-xs text-gray-400">{e.agent_root_cause}</p>
+                            )}
+
+                            {/* Proposed fix */}
+                            {e.agent_proposed_fix && (
+                              <div className="bg-gray-900 rounded-lg p-3">
+                                <p className="text-xs text-purple-400 font-medium mb-1">Proposed Fix</p>
+                                <p className="text-xs text-gray-300">{e.agent_proposed_fix}</p>
+                              </div>
+                            )}
+
+                            {/* Fix code block */}
+                            {e.agent_fix_code && (
+                              <div className="bg-gray-950 rounded-lg p-3">
+                                <p className="text-xs text-green-400 font-medium mb-2">
+                                  {e.agent_affected_file && `File: ${e.agent_affected_file}`}
+                                </p>
+                                <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">{e.agent_fix_code}</pre>
+                              </div>
+                            )}
+
+                            {/* Plain English explanation */}
+                            {e.agent_explanation && (
+                              <p className="text-xs text-gray-500 italic border-t border-gray-800 pt-2">{e.agent_explanation}</p>
+                            )}
+
+                            {/* Auto-apply badge */}
+                            {e.agent_can_auto_apply && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded-full">
+                                  ⚡ Auto-apply available in Phase 2
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -580,4 +640,4 @@ export default function PipelineDetailPage() {
       )}
     </div>
   );
-}// healed
+}

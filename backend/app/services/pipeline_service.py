@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.models.pipeline import Pipeline, PipelineRun, StageLog, PipelineStatus
+from app.services.healing_agent import HealingAgent
 
 logger = logging.getLogger(__name__)
 
@@ -328,17 +329,19 @@ class PipelineService:
 
     def _run_failure_analysis(self, run: PipelineRun) -> None:
         """
-        Phase 4: Failure analysis
+        Called automatically after every failed run.
+        Phase 4: Failure classification
         Phase 6: Recommendations
-        Phase 7: Self-healing evaluation
-        All triggered automatically after every failed run.
+        Phase 7: Self-healing
+        Phase AI: Healing agent analysis (NEW)
         """
         from app.services.failure_analysis import FailureAnalysisEngine
         from app.services.recommendation_engine import RecommendationEngine
         from app.services.healing_engine import SelfHealingEngine
-
+        from app.services.healing_agent import HealingAgent
+ 
+        # ── Phase 4: Classify the failure ─────────────────────────
         try:
-            # Phase 4: Classify the failure
             engine = FailureAnalysisEngine()
             result = engine.analyze(run)
             if result:
@@ -355,20 +358,21 @@ class PipelineService:
                 )
         except Exception as e:
             logger.error(f"Failure analysis error for run {run.id}: {e}")
-
+ 
+        # ── Phase 6: Generate recommendations ─────────────────────
         try:
-            # Phase 6: Generate recommendations
             rec_engine = RecommendationEngine(self.db)
             report     = rec_engine.generate(run.pipeline_id, run_id=run.id)
             logger.info(
                 f"Generated {report.total_count} recommendations "
-                f"for pipeline {run.pipeline_id}"
+                f"({report.p1_count} P1) for pipeline {run.pipeline_id}"
             )
         except Exception as e:
             logger.error(f"Recommendation error for run {run.id}: {e}")
-
+ 
+        # ── Phase 7: Self-healing evaluation ──────────────────────
+        healing_log = None
         try:
-            # Phase 7: Self-healing evaluation
             healing_engine = SelfHealingEngine(self.db)
             healing_log    = healing_engine.evaluate_and_heal(run)
             if healing_log:
@@ -378,3 +382,39 @@ class PipelineService:
                 )
         except Exception as e:
             logger.error(f"Self-healing error for run {run.id}: {e}")
+ 
+        # ── Phase AI: Healing agent analysis ──────────────────────
+        # Determine priority from recommendation report
+        try:
+            priority = "P2"  # default
+            try:
+                rec_engine = RecommendationEngine(self.db)
+                report     = rec_engine.generate(run.pipeline_id, run_id=run.id)
+                if report and report.p1_count > 0:
+                    priority = "P1"
+                elif report and report.total_count > 0:
+                    priority = "P2"
+                else:
+                    priority = "P3"
+            except Exception:
+                pass
+ 
+            # Only run agent for P1 and P2
+            if priority in ("P1", "P2") and healing_log:
+                agent = HealingAgent(self.db)
+                analysis = agent.analyse_and_propose_fix(
+                    run=run,
+                    healing_log=healing_log,
+                    priority=priority,
+                )
+                if analysis:
+                    logger.info(
+                        f"AI Agent analysis complete for run {run.id}: "
+                        f"confidence={analysis.get('confidence', 'unknown')} | "
+                        f"fix_type={analysis.get('fix_type', 'unknown')}"
+                    )
+                else:
+                    logger.info(f"AI Agent skipped for run {run.id}")
+ 
+        except Exception as e:
+            logger.error(f"AI Healing Agent error for run {run.id}: {e}")
