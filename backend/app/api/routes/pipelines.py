@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 from typing import List
 from collections import Counter
 import logging
@@ -115,8 +115,60 @@ def delete_pipeline(
     ).first()
     if not p:
         raise HTTPException(status_code=404, detail="Pipeline not found")
-    db.delete(p)
-    db.commit()
+
+    try:
+        # Delete all related records manually in correct order
+        # to avoid foreign key constraint errors
+
+        # 1. Get all run IDs for this pipeline
+        run_ids = [r.id for r in db.query(PipelineRun.id).filter(
+            PipelineRun.pipeline_id == pipeline_id
+        ).all()]
+
+        # 2. Delete stage logs for all runs
+        if run_ids:
+            db.execute(
+                text("DELETE FROM stage_logs WHERE run_id = ANY(:ids)"),
+                {"ids": run_ids}
+            )
+
+        # 3. Delete healing logs
+        db.execute(
+            text("DELETE FROM healing_logs WHERE pipeline_id = :pid"),
+            {"pid": pipeline_id}
+        )
+
+        # 4. Delete pipeline members
+        db.execute(
+            text("DELETE FROM pipeline_members WHERE pipeline_id = :pid"),
+            {"pid": pipeline_id}
+        )
+
+        # 5. Delete notifications linked to this pipeline
+        db.execute(
+            text("UPDATE notifications SET pipeline_id = NULL WHERE pipeline_id = :pid"),
+            {"pid": pipeline_id}
+        )
+
+        # 6. Delete all runs
+        db.execute(
+            text("DELETE FROM pipeline_runs WHERE pipeline_id = :pid"),
+            {"pid": pipeline_id}
+        )
+
+        # 7. Finally delete the pipeline
+        db.execute(
+            text("DELETE FROM pipelines WHERE id = :pid"),
+            {"pid": pipeline_id}
+        )
+
+        db.commit()
+        logger.info(f"Pipeline {pipeline_id} deleted successfully")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to delete pipeline {pipeline_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete pipeline: {str(e)}")
 
 
 # ── Runs ──────────────────────────────────────────────────────────
@@ -480,12 +532,8 @@ def get_stats(
     )
 
     total_runs  = run_query.count()
-    successful  = run_query.filter(
-        PipelineRun.status == PipelineStatus.SUCCESS
-    ).count()
-    failed      = run_query.filter(
-        PipelineRun.status == PipelineStatus.FAILED
-    ).count()
+    successful  = run_query.filter(PipelineRun.status == PipelineStatus.SUCCESS).count()
+    failed      = run_query.filter(PipelineRun.status == PipelineStatus.FAILED).count()
     success_rate = round((successful / total_runs * 100), 1) if total_runs > 0 else 0.0
 
     avg_duration = db.query(
@@ -552,11 +600,11 @@ async def github_webhook(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    payload    = await request.json()
-    ref        = payload.get("ref", "")
-    branch     = ref.replace("refs/heads/", "")
-    repo_url   = payload.get("repository", {}).get("clone_url", "")
-    pusher     = payload.get("pusher", {}).get("name", "webhook")
+    payload  = await request.json()
+    ref      = payload.get("ref", "")
+    branch   = ref.replace("refs/heads/", "")
+    repo_url = payload.get("repository", {}).get("clone_url", "")
+    pusher   = payload.get("pusher", {}).get("name", "webhook")
 
     if not repo_url:
         return {"status": "ignored", "reason": "no repository URL"}
