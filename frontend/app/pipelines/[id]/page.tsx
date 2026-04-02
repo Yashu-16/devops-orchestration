@@ -242,10 +242,9 @@ YOUR RULES:
   const fmt = (text: string) =>
     text
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/```([\s\S]*?)```/g, "<pre class="cb">$1</pre>")
-      .replace(/`([^`]+)`/g, "<code class="ic">$1</code>")
-      .replace(/
-/g, "<br/>");
+      .replace(/```([\s\S]*?)```/g, '<pre class="cb">$1</pre>')
+      .replace(/`([^`]+)`/g, '<code class="ic">$1</code>')
+      .replace(/\n/g, "<br/>");
 
   return (
     <div className="flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" style={{ height: "600px" }}>
