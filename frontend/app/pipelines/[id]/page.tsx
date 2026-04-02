@@ -9,13 +9,14 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 
-type Tab = "overview" | "runs" | "analytics" | "healing" | "ml" | "members";
+type Tab = "overview" | "runs" | "analytics" | "healing" | "agent" | "ml" | "members";
 
-const TABS: { id: Tab; label: string }[] = [
+const TABS: { id: Tab; label: string; badge?: string }[] = [
   { id: "overview",  label: "Overview"  },
   { id: "runs",      label: "Runs"      },
   { id: "analytics", label: "Analytics" },
   { id: "healing",   label: "Healing"   },
+  { id: "agent",     label: "AI Agent", badge: "NEW" },
   { id: "ml",        label: "ML Risk"   },
   { id: "members",   label: "Access"    },
 ];
@@ -68,7 +69,7 @@ export default function PipelineDetailPage() {
         const r = await axios.get(`${B}/api/v1/pipelines/${id}/analytics`, { headers: H });
         setAnalytics(r.data);
       }
-      if (t === "healing") {
+      if (t === "healing" || t === "agent") {
         const r = await axios.get(`${B}/api/v1/pipelines/${id}/healing`, { headers: H });
         setHealing(r.data);
       }
@@ -113,6 +114,9 @@ export default function PipelineDetailPage() {
     } catch (e: any) { setError(e.response?.data?.detail || "Failed to remove"); }
   };
 
+  // Events that have agent analysis
+  const agentEvents = (healing?.events ?? []).filter((e: any) => e.agent_analysed);
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
 
@@ -152,14 +156,12 @@ export default function PipelineDetailPage() {
               </span>
             </div>
           </div>
-
-          {/* Quick stats */}
           <div className="grid grid-cols-4 gap-3 mt-4">
             {[
-              { label: "Total Runs",    value: overview.total_runs },
-              { label: "Success Rate",  value: `${100 - overview.failure_rate}%`, color: "text-green-400" },
-              { label: "Failure Rate",  value: `${overview.failure_rate}%`, color: "text-red-400" },
-              { label: "Avg Duration",  value: `${overview.avg_duration}s` },
+              { label: "Total Runs",   value: overview.total_runs },
+              { label: "Success Rate", value: `${100 - overview.failure_rate}%`, color: "text-green-400" },
+              { label: "Failure Rate", value: `${overview.failure_rate}%`, color: "text-red-400" },
+              { label: "Avg Duration", value: `${overview.avg_duration}s` },
             ].map(({ label, value, color }) => (
               <div key={label} className="bg-gray-800 rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-500 mb-1">{label}</p>
@@ -171,13 +173,25 @@ export default function PipelineDetailPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-900 border border-gray-800 rounded-xl p-1">
+      <div className="flex gap-1 mb-6 bg-gray-900 border border-gray-800 rounded-xl p-1 overflow-x-auto">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
-              tab === t.id ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
+            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex items-center justify-center gap-1.5 ${
+              tab === t.id
+                ? t.id === "agent" ? "bg-purple-700 text-white" : "bg-blue-600 text-white"
+                : "text-gray-400 hover:text-white"
             }`}>
             {t.label}
+            {t.badge && (
+              <span className="text-xs bg-purple-500 text-white px-1.5 py-0.5 rounded-full font-bold leading-none">
+                {t.badge}
+              </span>
+            )}
+            {t.id === "agent" && agentEvents.length > 0 && tab !== "agent" && (
+              <span className="text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded-full font-bold leading-none">
+                {agentEvents.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -194,14 +208,55 @@ export default function PipelineDetailPage() {
         </div>
       ) : (
         <>
+
+          {/* ── OVERVIEW TAB ─────────────────────────────────────── */}
+          {tab === "overview" && overview && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-3">Pipeline Details</h3>
+                <div className="space-y-3">
+                  {[
+                    { label: "Repository", value: overview.repository || "Not set" },
+                    { label: "Branch",     value: overview.branch || "main" },
+                    { label: "Created",    value: new Date(overview.created_at).toLocaleDateString() },
+                    { label: "Auto-Heal",  value: overview.self_heal_enabled ? "Enabled" : "Disabled" },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">{label}</span>
+                      <span className="text-xs text-white font-mono">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-3">Quick Actions</h3>
+                <div className="space-y-2">
+                  {TABS.filter(t => t.id !== "overview").map(t => (
+                    <button key={t.id} onClick={() => setTab(t.id)}
+                      className={`w-full text-left text-sm text-white px-4 py-2.5 rounded-lg transition-colors flex items-center justify-between ${
+                        t.id === "agent" ? "bg-purple-900/40 hover:bg-purple-900/60 border border-purple-800/50" : "bg-gray-800 hover:bg-gray-700"
+                      }`}>
+                      <span className="flex items-center gap-2">
+                        {t.id === "agent" && <span>🤖</span>}
+                        {t.label}
+                        {t.id === "agent" && agentEvents.length > 0 && (
+                          <span className="text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded-full">{agentEvents.length}</span>
+                        )}
+                      </span>
+                      <span className="text-gray-500 text-xs">→</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── RUNS TAB ─────────────────────────────────────────── */}
           {tab === "runs" && runs && (
             <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-white">Run History</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">{runs.total} total runs</p>
-                </div>
+              <div className="px-5 py-4 border-b border-gray-800">
+                <h2 className="text-sm font-semibold text-white">Run History</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{runs.total} total runs</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -223,9 +278,7 @@ export default function PipelineDetailPage() {
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-400 capitalize">{r.environment}</td>
                         <td className="px-4 py-3 text-xs text-gray-400">{r.triggered_by || "manual"}</td>
-                        <td className="px-4 py-3 text-xs text-gray-400">
-                          {r.stages_passed}/{r.stages_total}
-                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-400">{r.stages_passed}/{r.stages_total}</td>
                         <td className="px-4 py-3 text-xs text-gray-400">{r.duration_seconds}s</td>
                         <td className="px-4 py-3 text-xs text-gray-500 max-w-[160px] truncate">
                           {r.root_cause ? r.root_cause.replace(/\[.*?\]\s*/, "") : "—"}
@@ -248,7 +301,6 @@ export default function PipelineDetailPage() {
           {/* ── ANALYTICS TAB ────────────────────────────────────── */}
           {tab === "analytics" && analytics && (
             <div className="space-y-6">
-              {/* Summary cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                   { label: "Total Runs",   value: analytics.summary.total_runs },
@@ -262,8 +314,6 @@ export default function PipelineDetailPage() {
                   </div>
                 ))}
               </div>
-
-              {/* Trend chart */}
               {analytics.trend.length > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                   <h3 className="text-sm font-semibold text-white mb-4">Daily Run Trend</h3>
@@ -279,9 +329,7 @@ export default function PipelineDetailPage() {
                   </ResponsiveContainer>
                 </div>
               )}
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Stage failures */}
                 {analytics.stage_failures.length > 0 && (
                   <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                     <h3 className="text-sm font-semibold text-white mb-4">Stage Failures</h3>
@@ -296,8 +344,6 @@ export default function PipelineDetailPage() {
                     </ResponsiveContainer>
                   </div>
                 )}
-
-                {/* Root causes */}
                 {analytics.root_causes.length > 0 && (
                   <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                     <h3 className="text-sm font-semibold text-white mb-4">Root Cause Breakdown</h3>
@@ -318,17 +364,15 @@ export default function PipelineDetailPage() {
             </div>
           )}
 
-          {/* ── HEALING TAB ──────────────────────────────────────── */}
+          {/* ── HEALING TAB — system actions only, no AI clutter ── */}
           {tab === "healing" && healing && (
             <div className="space-y-4">
-
-              {/* Summary stats */}
               <div className="grid grid-cols-4 gap-4">
                 {[
-                  { label: "Total Events",  value: healing?.summary?.total ?? 0 },
-                  { label: "Auto-Healed",   value: healing?.summary?.succeeded ?? 0, color: "text-green-400" },
-                  { label: "Not Healed",    value: healing?.summary?.failed ?? 0, color: "text-red-400" },
-                  { label: "Heal Rate",     value: `${healing?.summary?.success_rate ?? 0}%`, color: "text-blue-400" },
+                  { label: "Total Events", value: healing?.summary?.total ?? 0 },
+                  { label: "Auto-Healed",  value: healing?.summary?.succeeded ?? 0, color: "text-green-400" },
+                  { label: "Not Healed",   value: healing?.summary?.failed ?? 0, color: "text-red-400" },
+                  { label: "Heal Rate",    value: `${healing?.summary?.success_rate ?? 0}%`, color: "text-blue-400" },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                     <p className="text-xs text-gray-500 mb-1">{label}</p>
@@ -337,141 +381,59 @@ export default function PipelineDetailPage() {
                 ))}
               </div>
 
-              {/* Legend */}
-              <div className="flex items-center gap-6 px-1 text-xs text-gray-500">
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500"></span>Auto-healed — system retried and it passed</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500"></span>Retry failed — still needs attention</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-500"></span>Rollback / Alert — human action needed</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-500"></span>AI analysis available</span>
-              </div>
-
-              {/* Events list */}
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">Healing Events</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">Every action the system took when a pipeline failed</p>
+              {agentEvents.length > 0 && (
+                <div className="bg-purple-950/30 border border-purple-800/40 rounded-xl px-5 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-purple-400">🤖</span>
+                    <span className="text-sm text-purple-300 font-medium">
+                      {agentEvents.length} AI Agent {agentEvents.length === 1 ? "analysis" : "analyses"} available
+                    </span>
+                    <span className="text-xs text-purple-500">— view detailed diagnoses and code fixes</span>
                   </div>
-                  <span className="text-xs text-purple-400 bg-purple-900/30 border border-purple-800/50 px-3 py-1 rounded-full">
-                    🤖 AI Agent Active
-                  </span>
+                  <button onClick={() => setTab("agent")}
+                    className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded-lg font-medium transition-colors">
+                    Open AI Agent →
+                  </button>
                 </div>
+              )}
 
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-800">
+                  <h2 className="text-sm font-semibold text-white">Healing Events</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Every action the system took when this pipeline failed</p>
+                </div>
                 {(healing?.events?.length ?? 0) === 0 ? (
                   <div className="p-12 text-center">
-                    <p className="text-gray-400 text-sm font-medium">No healing events yet</p>
+                    <p className="text-gray-400 text-sm">No healing events yet</p>
                     <p className="text-gray-600 text-xs mt-1">Events appear here when a pipeline fails and the system takes action</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-gray-800">
                     {(healing?.events ?? []).map((e: any) => (
-                      <div key={e.id} className="px-5 py-5 space-y-3">
-
-                        {/* ── Row 1: Status + Run info + Timestamp ── */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {/* Status badge */}
+                      <div key={e.id} className="px-5 py-4 flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
                             <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
-                              e.result === "retry_succeeded"
-                                ? "bg-green-900 text-green-300 border border-green-700"
-                                : e.result === "retry_failed"
-                                ? "bg-red-900 text-red-300 border border-red-700"
-                                : "bg-gray-800 text-gray-400 border border-gray-700"
+                              e.result === "retry_succeeded" ? "bg-green-900 text-green-300 border border-green-700" :
+                              e.result === "retry_failed"   ? "bg-red-900 text-red-300 border border-red-700" :
+                              "bg-gray-800 text-gray-400 border border-gray-700"
                             }`}>
                               {e.result === "retry_succeeded" ? "✓ Auto-Healed" :
-                               e.result === "retry_failed"    ? "✗ Retry Failed" :
-                               e.action === "rollback"        ? "⟳ Rolled Back" :
+                               e.result === "retry_failed"   ? "✗ Retry Failed" :
+                               e.action === "rollback"       ? "⟳ Rolled Back" :
                                "● " + (e.action || "Alert")}
                             </span>
-                            <span className="text-xs text-gray-400">Run #{e.run_id}</span>
-                            {e.retry_number > 0 && (
-                              <span className="text-xs text-gray-600">Attempt {e.retry_number}</span>
+                            <span className="text-xs text-gray-500">Run #{e.run_id}</span>
+                            {e.retry_number > 0 && <span className="text-xs text-gray-600">Attempt {e.retry_number}</span>}
+                            {e.agent_analysed && (
+                              <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800/50 px-2 py-0.5 rounded-full">
+                                🤖 AI analysed
+                              </span>
                             )}
                           </div>
-                          <span className="text-xs text-gray-600">{new Date(e.created_at).toLocaleString()}</span>
+                          <p className="text-sm text-gray-400">{e.reason}</p>
                         </div>
-
-                        {/* ── Row 2: What the system did ── */}
-                        <div className="bg-gray-800/50 rounded-lg px-4 py-3">
-                          <p className="text-xs text-gray-400 font-medium mb-1">What the system did</p>
-                          <p className="text-sm text-gray-300">{e.reason}</p>
-                        </div>
-
-                        {/* ── Row 3: AI Agent Analysis (shown only when available) ── */}
-                        {e.agent_analysed && (
-                          <div className="border border-purple-800/40 bg-purple-950/20 rounded-xl overflow-hidden">
-
-                            {/* Agent header */}
-                            <div className="px-4 py-3 border-b border-purple-800/30 flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm">🤖</span>
-                                <span className="text-sm font-semibold text-purple-300">AI Agent Diagnosis</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                                  e.agent_confidence === "high"
-                                    ? "bg-green-900/50 text-green-300 border-green-700"
-                                    : e.agent_confidence === "medium"
-                                    ? "bg-yellow-900/50 text-yellow-300 border-yellow-700"
-                                    : "bg-gray-800 text-gray-400 border-gray-700"
-                                }`}>
-                                  {e.agent_confidence === "high"   ? "High confidence" :
-                                   e.agent_confidence === "medium" ? "Medium confidence" :
-                                   "Low confidence"}
-                                </span>
-                                {e.agent_fix_time && (
-                                  <span className="text-xs text-gray-500">⏱ {e.agent_fix_time}</span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="p-4 space-y-4">
-
-                              {/* What went wrong */}
-                              {e.agent_summary && (
-                                <div>
-                                  <p className="text-xs font-semibold text-purple-400 uppercase tracking-wide mb-1">What went wrong</p>
-                                  <p className="text-sm text-white">{e.agent_summary}</p>
-                                </div>
-                              )}
-
-                              {/* Why it happened */}
-                              {e.agent_root_cause && (
-                                <div>
-                                  <p className="text-xs font-semibold text-purple-400 uppercase tracking-wide mb-1">Why it happened</p>
-                                  <p className="text-sm text-gray-300">{e.agent_root_cause}</p>
-                                </div>
-                              )}
-
-                              {/* How to fix it */}
-                              {e.agent_proposed_fix && (
-                                <div>
-                                  <p className="text-xs font-semibold text-green-400 uppercase tracking-wide mb-1">How to fix it</p>
-                                  <p className="text-sm text-gray-300">{e.agent_proposed_fix}</p>
-                                </div>
-                              )}
-
-                              {/* Exact fix — code block */}
-                              {e.agent_fix_code && (
-                                <div>
-                                  <div className="flex items-center justify-between mb-1">
-                                    <p className="text-xs font-semibold text-green-400 uppercase tracking-wide">
-                                      Exact fix{e.agent_affected_file ? ` — ${e.agent_affected_file}` : ""}
-                                    </p>
-                                    {e.agent_can_auto_apply && (
-                                      <span className="text-xs bg-blue-900/50 text-blue-300 border border-blue-700 px-2 py-0.5 rounded-full">
-                                        ⚡ Simple fix — copy and paste this
-                                      </span>
-                                    )}
-                                  </div>
-                                  <pre className="bg-gray-950 border border-gray-700 rounded-lg p-3 text-xs text-green-300 overflow-x-auto whitespace-pre-wrap font-mono">{e.agent_fix_code}</pre>
-                                </div>
-                              )}
-
-                            </div>
-                          </div>
-                        )}
-
+                        <span className="text-xs text-gray-600 flex-shrink-0">{new Date(e.created_at).toLocaleString()}</span>
                       </div>
                     ))}
                   </div>
@@ -480,10 +442,137 @@ export default function PipelineDetailPage() {
             </div>
           )}
 
+          {/* ── AI AGENT TAB — full diagnoses and fixes ───────────── */}
+          {tab === "agent" && (
+            <div className="space-y-4">
+
+              {/* Header */}
+              <div className="bg-purple-950/30 border border-purple-800/40 rounded-xl p-5">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">🤖</span>
+                  <div>
+                    <h2 className="text-base font-semibold text-purple-200">AI Healing Agent</h2>
+                    <p className="text-xs text-purple-400 mt-0.5">
+                      Reads your error logs, finds the root cause, and tells you exactly what to fix
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3 mt-4">
+                  {[
+                    { label: "Analyses done",   value: agentEvents.length },
+                    { label: "High confidence", value: agentEvents.filter((e: any) => e.agent_confidence === "high").length },
+                    { label: "Auto-fixable",    value: agentEvents.filter((e: any) => e.agent_can_auto_apply).length },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-purple-900/20 border border-purple-800/30 rounded-lg p-3 text-center">
+                      <p className="text-xl font-bold text-purple-300">{value}</p>
+                      <p className="text-xs text-purple-500 mt-0.5">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {agentEvents.length === 0 ? (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-16 text-center">
+                  <div className="text-4xl mb-4">🤖</div>
+                  <p className="text-gray-300 text-sm font-medium mb-2">No AI analyses yet</p>
+                  <p className="text-gray-500 text-xs leading-relaxed max-w-sm mx-auto">
+                    The AI Agent automatically analyses failures when this pipeline fails.
+                    Make sure <span className="text-purple-400 font-mono">ANTHROPIC_API_KEY</span> is set in Railway Variables.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {agentEvents.map((e: any) => (
+                    <div key={e.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+
+                      {/* Event header */}
+                      <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                            e.result === "retry_succeeded" ? "bg-green-900 text-green-300 border border-green-700" :
+                            e.result === "retry_failed"   ? "bg-red-900 text-red-300 border border-red-700" :
+                            "bg-gray-800 text-gray-400 border border-gray-700"
+                          }`}>
+                            {e.result === "retry_succeeded" ? "✓ Auto-Healed" :
+                             e.result === "retry_failed"   ? "✗ Retry Failed" :
+                             "● " + (e.action || "Alert")}
+                          </span>
+                          <span className="text-xs text-gray-500">Run #{e.run_id}</span>
+                          <span className="text-xs text-gray-600">{new Date(e.created_at).toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                            e.agent_confidence === "high"   ? "bg-green-900/50 text-green-300 border-green-700" :
+                            e.agent_confidence === "medium" ? "bg-yellow-900/50 text-yellow-300 border-yellow-700" :
+                            "bg-gray-800 text-gray-400 border-gray-700"
+                          }`}>
+                            {e.agent_confidence === "high" ? "✓ High confidence" :
+                             e.agent_confidence === "medium" ? "~ Medium confidence" : "Low confidence"}
+                          </span>
+                          {e.agent_fix_time && (
+                            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">
+                              ⏱ {e.agent_fix_time}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-5 space-y-5">
+
+                        {/* What went wrong */}
+                        {e.agent_summary && (
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">What went wrong</p>
+                            <p className="text-base text-white font-medium">{e.agent_summary}</p>
+                          </div>
+                        )}
+
+                        {/* Why it happened */}
+                        {e.agent_root_cause && (
+                          <div className="bg-gray-800 rounded-lg p-4">
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Why it happened</p>
+                            <p className="text-sm text-gray-300 leading-relaxed">{e.agent_root_cause}</p>
+                          </div>
+                        )}
+
+                        {/* How to fix it */}
+                        {e.agent_proposed_fix && (
+                          <div>
+                            <p className="text-xs font-bold text-green-400 uppercase tracking-widest mb-2">How to fix it</p>
+                            <p className="text-sm text-gray-300 leading-relaxed">{e.agent_proposed_fix}</p>
+                          </div>
+                        )}
+
+                        {/* Exact fix code block */}
+                        {e.agent_fix_code && (
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs font-bold text-green-400 uppercase tracking-widest">
+                                Exact fix{e.agent_affected_file ? ` — ${e.agent_affected_file}` : ""}
+                              </p>
+                              {e.agent_can_auto_apply && (
+                                <span className="text-xs bg-blue-900/50 text-blue-300 border border-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                  ⚡ Copy and paste this
+                                </span>
+                              )}
+                            </div>
+                            <pre className="bg-gray-950 border border-gray-700 rounded-lg p-4 text-sm text-green-300 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
+                              {e.agent_fix_code}
+                            </pre>
+                          </div>
+                        )}
+
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── ML TAB ───────────────────────────────────────────── */}
           {tab === "ml" && ml && (
             <div className="space-y-6">
-              {/* Current risk */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                 <h2 className="text-sm font-semibold text-white mb-4">Current Risk Assessment</h2>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -503,8 +592,6 @@ export default function PipelineDetailPage() {
                   <p className="text-xs text-blue-400 mt-3">✓ ML model active for this pipeline</p>
                 )}
               </div>
-
-              {/* Risk factors */}
               {(ml?.factors?.length ?? 0) > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                   <h2 className="text-sm font-semibold text-white mb-4">Risk Factors</h2>
@@ -521,16 +608,13 @@ export default function PipelineDetailPage() {
                           </span>
                         </div>
                         <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-orange-500 rounded-full"
-                            style={{ width: `${(f.score ?? 0) * 100}%` }}/>
+                          <div className="h-full bg-orange-500 rounded-full" style={{ width: `${(f.score ?? 0) * 100}%` }}/>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-
-              {/* Risk trend */}
               {(ml?.risk_trend?.length ?? 0) > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                   <h2 className="text-sm font-semibold text-white mb-4">Risk Score Trend (Last 10 Runs)</h2>
@@ -539,16 +623,12 @@ export default function PipelineDetailPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#374151"/>
                       <XAxis dataKey="run_id" tickFormatter={(v) => `#${v}`} tick={{ fontSize: 10, fill: "#6b7280" }}/>
                       <YAxis domain={[0,1]} tickFormatter={(v) => `${Math.round(v*100)}%`} tick={{ fontSize: 10, fill: "#6b7280" }}/>
-                      <Tooltip
-                        formatter={(v: any) => [`${Math.round(Number(v)*100)}%`, "Risk"]}
-                        contentStyle={{ background: "#111827", border: "1px solid #374151" }}/>
+                      <Tooltip formatter={(v: any) => [`${Math.round(Number(v)*100)}%`, "Risk"]} contentStyle={{ background: "#111827", border: "1px solid #374151" }}/>
                       <Line type="monotone" dataKey="risk_score" stroke="#f97316" strokeWidth={2} dot={{ fill: "#f97316" }}/>
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               )}
-
-              {/* Recommendations */}
               {(ml?.recommendations?.length ?? 0) > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                   <h2 className="text-sm font-semibold text-white mb-4">Recommendations</h2>
@@ -564,9 +644,7 @@ export default function PipelineDetailPage() {
                           <span className="text-sm font-medium text-white">{r.title}</span>
                         </div>
                         <p className="text-xs text-gray-400">{r.description}</p>
-                        {r.action && (
-                          <p className="text-xs text-blue-400 mt-1 font-mono">→ {r.action}</p>
-                        )}
+                        {r.action && <p className="text-xs text-blue-400 mt-1 font-mono">→ {r.action}</p>}
                       </div>
                     ))}
                   </div>
@@ -578,20 +656,13 @@ export default function PipelineDetailPage() {
           {/* ── MEMBERS TAB ──────────────────────────────────────── */}
           {tab === "members" && members && (
             <div className="space-y-4">
-              {/* Assigned members */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-800">
-                  <h2 className="text-sm font-semibold text-white">
-                    Has Access ({members.assigned_members.length})
-                  </h2>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Admins and owners always have access. Members only see assigned pipelines.
-                  </p>
+                  <h2 className="text-sm font-semibold text-white">Has Access ({members.assigned_members.length})</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Admins and owners always have access.</p>
                 </div>
                 {members.assigned_members.length === 0 ? (
-                  <div className="p-8 text-center text-gray-500 text-sm">
-                    No members assigned yet. All admins/owners can still access.
-                  </div>
+                  <div className="p-8 text-center text-gray-500 text-sm">No members assigned yet.</div>
                 ) : (
                   <div className="divide-y divide-gray-800">
                     {members.assigned_members.map((m: any) => (
@@ -613,9 +684,7 @@ export default function PipelineDetailPage() {
                           }`}>{m.role}</span>
                           {m.role === "member" && (
                             <button onClick={() => handleRemove(m.user_id)}
-                              className="text-xs text-gray-600 hover:text-red-400 transition-colors">
-                              Remove
-                            </button>
+                              className="text-xs text-gray-600 hover:text-red-400 transition-colors">Remove</button>
                           )}
                         </div>
                       </div>
@@ -623,8 +692,6 @@ export default function PipelineDetailPage() {
                   </div>
                 )}
               </div>
-
-              {/* Assign new members */}
               {members.available_to_assign.length > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
                   <div className="px-5 py-4 border-b border-gray-800">
@@ -651,40 +718,6 @@ export default function PipelineDetailPage() {
                   </div>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* ── OVERVIEW TAB ─────────────────────────────────────── */}
-          {tab === "overview" && overview && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-white mb-3">Pipeline Details</h3>
-                <div className="space-y-3">
-                  {[
-                    { label: "Repository", value: overview.repository || "Not set" },
-                    { label: "Branch",     value: overview.branch || "main" },
-                    { label: "Created",    value: new Date(overview.created_at).toLocaleDateString() },
-                    { label: "Auto-Heal",  value: overview.self_heal_enabled ? "Enabled" : "Disabled" },
-                  ].map(({ label, value }) => (
-                    <div key={label} className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">{label}</span>
-                      <span className="text-xs text-white font-mono">{value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-white mb-3">Quick Actions</h3>
-                <div className="space-y-2">
-                  {TABS.filter(t => t.id !== "overview").map(t => (
-                    <button key={t.id} onClick={() => setTab(t.id)}
-                      className="w-full text-left bg-gray-800 hover:bg-gray-700 text-sm text-white px-4 py-2.5 rounded-lg transition-colors flex items-center justify-between">
-                      {t.label}
-                      <span className="text-gray-500 text-xs">→</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
         </>
