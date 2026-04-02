@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 import { getBackend, getAuthHeaders } from "@/lib/backend-url";
@@ -33,6 +33,243 @@ const statusBadge = (s: string) =>
   s === "failed"  ? "bg-red-900  text-red-300"    :
   s === "running" ? "bg-blue-900 text-blue-300"   :
                     "bg-gray-800 text-gray-400";
+
+
+// ── Agent Chat Component ───────────────────────────────────────────────────
+
+interface ChatMessage {
+  role: "user" | "agent";
+  content: string;
+  timestamp: Date;
+  isLoading?: boolean;
+}
+
+const QUICK_PROMPTS = [
+  "What is wrong with this pipeline?",
+  "Why does it keep failing?",
+  "How do I fix the latest error?",
+  "What is the risk score based on?",
+  "Show me the most recent failure details",
+];
+
+function AgentChat({ pipelineId, pipelineName, healing, overview }: {
+  pipelineId: string;
+  pipelineName: string;
+  healing: any;
+  overview: any;
+}) {
+  const [messages, setMessages] = React.useState<ChatMessage[]>([{
+    role: "agent",
+    content: `Hi! I am the AI agent for **${pipelineName}**. I know everything about this specific pipeline — its failures, risk score, healing history, and error logs. Ask me anything or tell me what you want to fix.`,
+    timestamp: new Date(),
+  }]);
+  const [input,   setInput]   = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const buildContext = () => {
+    const lines: string[] = [];
+    if (overview) {
+      lines.push(`PIPELINE: ${overview.name} (ID: ${pipelineId})`);
+      lines.push(`Last status: ${overview.last_run_status || "never run"}`);
+      lines.push(`Total runs: ${overview.total_runs}, Success rate: ${100 - (overview.failure_rate || 0)}%, Failure rate: ${overview.failure_rate || 0}%`);
+      lines.push(`Risk score: ${Math.round((overview.risk_score || 0) * 100)}%`);
+      lines.push(`Auto-heal: ${overview.self_heal_enabled ? "ON" : "OFF"}`);
+      lines.push(`Repository: ${overview.repository || "not set"}, Branch: ${overview.branch || "main"}`);
+    }
+    if (healing?.events?.length > 0) {
+      lines.push("\nRECENT HEALING EVENTS:");
+      healing.events.slice(0, 5).forEach((e: any) => {
+        lines.push(`Run #${e.run_id}: ${e.action} -> ${e.result} | ${e.reason}`);
+        if (e.agent_analysed) {
+          if (e.agent_summary)      lines.push(`  Summary: ${e.agent_summary}`);
+          if (e.agent_proposed_fix) lines.push(`  Fix: ${e.agent_proposed_fix}`);
+          if (e.agent_fix_code)     lines.push(`  Code: ${e.agent_fix_code}`);
+        }
+      });
+    }
+    return lines.join("\n");
+  };
+
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || sending) return;
+
+    const userMsg: ChatMessage = { role: "user",  content: text, timestamp: new Date() };
+    const loadMsg: ChatMessage = { role: "agent", content: "", timestamp: new Date(), isLoading: true };
+    setMessages(prev => [...prev, userMsg, loadMsg]);
+    setInput("");
+    setSending(true);
+
+    try {
+      const context  = buildContext();
+      const apiKey   = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "";
+
+      if (!apiKey) {
+        throw new Error("NEXT_PUBLIC_ANTHROPIC_API_KEY not set in Railway frontend Variables");
+      }
+
+      const history = messages
+        .filter(m => !m.isLoading)
+        .map(m => ({
+          role:    m.role === "user" ? "user" : "assistant",
+          content: m.content,
+        }));
+
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type":    "application/json",
+          "x-api-key":       apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model:      "claude-sonnet-4-20250514",
+          max_tokens: 1024,
+          system: `You are an AI DevOps agent for the pipeline "${pipelineName}" only.
+You have full context about this pipeline:
+
+${context}
+
+Rules:
+- Only help with THIS specific pipeline
+- When asked to fix an error, give the EXACT file name and content to change
+- Be specific and direct — no generic advice
+- Format code in markdown code blocks with the filename
+- Keep answers concise and actionable`,
+          messages: [...history, { role: "user", content: text }],
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error?.message || `API error ${resp.status}`);
+      }
+
+      const data    = await resp.json();
+      const reply   = data.content?.[0]?.text || "Sorry, I could not generate a response.";
+
+      setMessages(prev => prev.map((m, i) =>
+        i === prev.length - 1
+          ? { role: "agent", content: reply, timestamp: new Date() }
+          : m
+      ));
+    } catch (err: any) {
+      setMessages(prev => prev.map((m, i) =>
+        i === prev.length - 1
+          ? { role: "agent", content: `⚠️ Error: ${err.message}`, timestamp: new Date() }
+          : m
+      ));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const fmt = (text: string) =>
+    text
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/```([\s\S]*?)```/g, "<pre class=\"cb\">$1</pre>")
+      .replace(/`([^`]+)`/g, "<code class=\"ic\">$1</code>")
+      .replace(/\n/g, "<br/>");
+
+  return (
+    <div className="flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" style={{ height: "580px" }}>
+
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2 bg-purple-950/30">
+        <span>🤖</span>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-purple-200">Pipeline Agent</p>
+          <p className="text-xs text-purple-500">{pipelineName}</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-green-500" />
+          <span className="text-xs text-green-400">Active</span>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            {msg.role === "agent" && (
+              <div className="w-6 h-6 rounded-full bg-purple-800 flex items-center justify-center text-xs flex-shrink-0 mt-1">🤖</div>
+            )}
+            <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
+              msg.role === "user"
+                ? "bg-blue-600 text-white rounded-br-none"
+                : "bg-gray-800 text-gray-200 rounded-bl-none"
+            }`}>
+              {msg.isLoading ? (
+                <div className="flex items-center gap-1 py-1">
+                  {[0, 150, 300].map(d => (
+                    <div key={d} className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div dangerouslySetInnerHTML={{ __html: fmt(msg.content) }} />
+                  <p className="text-xs opacity-30 mt-1">
+                    {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </>
+              )}
+            </div>
+            {msg.role === "user" && (
+              <div className="w-6 h-6 rounded-full bg-blue-700 flex items-center justify-center text-xs flex-shrink-0 mt-1 font-bold">Y</div>
+            )}
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Quick prompts — only shown at the start */}
+      {messages.length === 1 && (
+        <div className="px-4 pb-2">
+          <p className="text-xs text-gray-600 mb-2">Try asking:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_PROMPTS.map(p => (
+              <button key={p} onClick={() => sendMessage(p)}
+                className="text-xs bg-gray-800 hover:bg-purple-900/40 border border-gray-700 hover:border-purple-700 text-gray-400 hover:text-purple-300 px-2.5 py-1 rounded-full transition-all">
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Input */}
+      <div className="px-3 py-3 border-t border-gray-800 flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage(input)}
+          placeholder="Ask about this pipeline..."
+          disabled={sending}
+          className="flex-1 bg-gray-800 border border-gray-700 focus:border-purple-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none disabled:opacity-50"
+        />
+        <button
+          onClick={() => sendMessage(input)}
+          disabled={sending || !input.trim()}
+          className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          {sending
+            ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
+            : "→"}
+        </button>
+      </div>
+
+      <style>{`
+        .cb { background:#030712; border:1px solid #374151; border-radius:6px; padding:8px 10px; font-family:monospace; font-size:11px; color:#86efac; white-space:pre-wrap; margin:4px 0; display:block; overflow-x:auto; }
+        .ic { background:#1f2937; color:#93c5fd; padding:1px 5px; border-radius:4px; font-family:monospace; font-size:11px; }
+      `}</style>
+    </div>
+  );
+}
 
 export default function PipelineDetailPage() {
   const params   = useParams();
@@ -442,26 +679,26 @@ export default function PipelineDetailPage() {
             </div>
           )}
 
-          {/* ── AI AGENT TAB — full diagnoses and fixes ───────────── */}
+          {/* ── AI AGENT TAB ─────────────────────────────────────────── */}
           {tab === "agent" && (
             <div className="space-y-4">
 
-              {/* Header */}
+              {/* Header stats */}
               <div className="bg-purple-950/30 border border-purple-800/40 rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-2">
+                <div className="flex items-center gap-3 mb-3">
                   <span className="text-2xl">🤖</span>
                   <div>
-                    <h2 className="text-base font-semibold text-purple-200">AI Healing Agent</h2>
+                    <h2 className="text-base font-semibold text-purple-200">AI Agent — {overview?.name}</h2>
                     <p className="text-xs text-purple-400 mt-0.5">
-                      Reads your error logs, finds the root cause, and tells you exactly what to fix
+                      Chat with the agent about this pipeline. Ask it to explain errors, analyse failures, and tell you exactly how to fix them.
                     </p>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-3 mt-4">
+                <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: "Analyses done",   value: agentEvents.length },
-                    { label: "High confidence", value: agentEvents.filter((e: any) => e.agent_confidence === "high").length },
-                    { label: "Auto-fixable",    value: agentEvents.filter((e: any) => e.agent_can_auto_apply).length },
+                    { label: "Auto-analyses done",  value: agentEvents.length },
+                    { label: "High confidence",     value: agentEvents.filter((e: any) => e.agent_confidence === "high").length },
+                    { label: "Auto-fixable errors", value: agentEvents.filter((e: any) => e.agent_can_auto_apply).length },
                   ].map(({ label, value }) => (
                     <div key={label} className="bg-purple-900/20 border border-purple-800/30 rounded-lg p-3 text-center">
                       <p className="text-xl font-bold text-purple-300">{value}</p>
@@ -471,102 +708,66 @@ export default function PipelineDetailPage() {
                 </div>
               </div>
 
-              {agentEvents.length === 0 ? (
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-16 text-center">
-                  <div className="text-4xl mb-4">🤖</div>
-                  <p className="text-gray-300 text-sm font-medium mb-2">No AI analyses yet</p>
-                  <p className="text-gray-500 text-xs leading-relaxed max-w-sm mx-auto">
-                    The AI Agent automatically analyses failures when this pipeline fails.
-                    Make sure <span className="text-purple-400 font-mono">ANTHROPIC_API_KEY</span> is set in Railway Variables.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  {agentEvents.map((e: any) => (
-                    <div key={e.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              {/* Two columns: chat + past analyses */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
 
-                      {/* Event header */}
-                      <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                {/* Chat panel */}
+                <AgentChat
+                  pipelineId={id}
+                  pipelineName={overview?.name || "Pipeline"}
+                  healing={healing}
+                  overview={overview}
+                />
+
+                {/* Past auto-analyses */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-gray-400">Past Auto-Analyses</h3>
+                  {agentEvents.length === 0 ? (
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
+                      <div className="text-3xl mb-3">🤖</div>
+                      <p className="text-gray-400 text-sm mb-1">No automatic analyses yet</p>
+                      <p className="text-gray-600 text-xs">The agent auto-analyses failures when they happen. Use the chat panel to ask questions right now.</p>
+                    </div>
+                  ) : agentEvents.map((e: any) => (
+                    <div key={e.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
-                            e.result === "retry_succeeded" ? "bg-green-900 text-green-300 border border-green-700" :
-                            e.result === "retry_failed"   ? "bg-red-900 text-red-300 border border-red-700" :
-                            "bg-gray-800 text-gray-400 border border-gray-700"
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                            e.result === "retry_succeeded" ? "bg-green-900 text-green-300" :
+                            e.result === "retry_failed"   ? "bg-red-900 text-red-300" :
+                            "bg-gray-800 text-gray-400"
                           }`}>
-                            {e.result === "retry_succeeded" ? "✓ Auto-Healed" :
-                             e.result === "retry_failed"   ? "✗ Retry Failed" :
-                             "● " + (e.action || "Alert")}
+                            {e.result === "retry_succeeded" ? "✓ Healed" : e.result === "retry_failed" ? "✗ Failed" : "● " + (e.action || "Alert")}
                           </span>
                           <span className="text-xs text-gray-500">Run #{e.run_id}</span>
-                          <span className="text-xs text-gray-600">{new Date(e.created_at).toLocaleString()}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                            e.agent_confidence === "high"   ? "bg-green-900/50 text-green-300 border-green-700" :
-                            e.agent_confidence === "medium" ? "bg-yellow-900/50 text-yellow-300 border-yellow-700" :
-                            "bg-gray-800 text-gray-400 border-gray-700"
-                          }`}>
-                            {e.agent_confidence === "high" ? "✓ High confidence" :
-                             e.agent_confidence === "medium" ? "~ Medium confidence" : "Low confidence"}
-                          </span>
-                          {e.agent_fix_time && (
-                            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">
-                              ⏱ {e.agent_fix_time}
-                            </span>
-                          )}
-                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                          e.agent_confidence === "high"   ? "bg-green-900/40 text-green-300 border-green-800" :
+                          e.agent_confidence === "medium" ? "bg-yellow-900/40 text-yellow-300 border-yellow-800" :
+                          "bg-gray-800 text-gray-500 border-gray-700"
+                        }`}>{e.agent_confidence} confidence</span>
                       </div>
-
-                      <div className="p-5 space-y-5">
-
-                        {/* What went wrong */}
+                      <div className="p-4 space-y-3">
                         {e.agent_summary && (
                           <div>
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">What went wrong</p>
-                            <p className="text-base text-white font-medium">{e.agent_summary}</p>
+                            <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-1">What went wrong</p>
+                            <p className="text-sm text-white">{e.agent_summary}</p>
                           </div>
                         )}
-
-                        {/* Why it happened */}
-                        {e.agent_root_cause && (
-                          <div className="bg-gray-800 rounded-lg p-4">
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Why it happened</p>
-                            <p className="text-sm text-gray-300 leading-relaxed">{e.agent_root_cause}</p>
-                          </div>
-                        )}
-
-                        {/* How to fix it */}
                         {e.agent_proposed_fix && (
                           <div>
-                            <p className="text-xs font-bold text-green-400 uppercase tracking-widest mb-2">How to fix it</p>
-                            <p className="text-sm text-gray-300 leading-relaxed">{e.agent_proposed_fix}</p>
+                            <p className="text-xs text-green-400 uppercase tracking-wide font-semibold mb-1">How to fix</p>
+                            <p className="text-xs text-gray-300">{e.agent_proposed_fix}</p>
                           </div>
                         )}
-
-                        {/* Exact fix code block */}
                         {e.agent_fix_code && (
-                          <div>
-                            <div className="flex items-center justify-between mb-2">
-                              <p className="text-xs font-bold text-green-400 uppercase tracking-widest">
-                                Exact fix{e.agent_affected_file ? ` — ${e.agent_affected_file}` : ""}
-                              </p>
-                              {e.agent_can_auto_apply && (
-                                <span className="text-xs bg-blue-900/50 text-blue-300 border border-blue-700 px-2 py-0.5 rounded-full font-medium">
-                                  ⚡ Copy and paste this
-                                </span>
-                              )}
-                            </div>
-                            <pre className="bg-gray-950 border border-gray-700 rounded-lg p-4 text-sm text-green-300 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
-                              {e.agent_fix_code}
-                            </pre>
-                          </div>
+                          <pre className="bg-gray-950 border border-gray-700 rounded-lg p-3 text-xs text-green-300 overflow-x-auto whitespace-pre-wrap font-mono">{e.agent_fix_code}</pre>
                         )}
-
                       </div>
                     </div>
                   ))}
                 </div>
-              )}
+              </div>
             </div>
           )}
 
