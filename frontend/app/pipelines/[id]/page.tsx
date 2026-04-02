@@ -49,18 +49,20 @@ const QUICK_PROMPTS = [
   "Why does it keep failing?",
   "How do I fix the latest error?",
   "What is the risk score based on?",
-  "Show me the most recent failure details",
+  "Summarise all failures in the last 10 runs",
 ];
 
-function AgentChat({ pipelineId, pipelineName, healing, overview }: {
+function AgentChat({ pipelineId, pipelineName, healing, overview, runs, ml }: {
   pipelineId: string;
   pipelineName: string;
   healing: any;
   overview: any;
+  runs: any;
+  ml: any;
 }) {
   const [messages, setMessages] = React.useState<ChatMessage[]>([{
     role: "agent",
-    content: `Hi! I am the AI agent for **${pipelineName}**. I know everything about this specific pipeline — its failures, risk score, healing history, and error logs. Ask me anything or tell me what you want to fix.`,
+    content: `Hi! I am the AI agent for **${pipelineName}**. I have full knowledge of this pipeline — every run, every error, every healing event, and the current risk score. What would you like to know or fix?`,
     timestamp: new Date(),
   }]);
   const [input,   setInput]   = React.useState("");
@@ -71,28 +73,83 @@ function AgentChat({ pipelineId, pipelineName, healing, overview }: {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Build a rich context string from all available pipeline data
   const buildContext = () => {
     const lines: string[] = [];
+
+    // ── Overview ──────────────────────────────────────────
     if (overview) {
-      lines.push(`PIPELINE: ${overview.name} (ID: ${pipelineId})`);
-      lines.push(`Last status: ${overview.last_run_status || "never run"}`);
-      lines.push(`Total runs: ${overview.total_runs}, Success rate: ${100 - (overview.failure_rate || 0)}%, Failure rate: ${overview.failure_rate || 0}%`);
-      lines.push(`Risk score: ${Math.round((overview.risk_score || 0) * 100)}%`);
-      lines.push(`Auto-heal: ${overview.self_heal_enabled ? "ON" : "OFF"}`);
-      lines.push(`Repository: ${overview.repository || "not set"}, Branch: ${overview.branch || "main"}`);
+      lines.push("=== PIPELINE OVERVIEW ===");
+      lines.push(`Name: ${overview.name}`);
+      lines.push(`Status: ${overview.last_run_status || "never run"}`);
+      lines.push(`Total runs: ${overview.total_runs}`);
+      lines.push(`Success rate: ${100 - (overview.failure_rate || 0)}%`);
+      lines.push(`Failure rate: ${overview.failure_rate || 0}%`);
+      lines.push(`Avg duration: ${overview.avg_duration}s`);
+      lines.push(`Risk score: ${Math.round((overview.risk_score || 0) * 100)}% — ${overview.risk_level || "unknown"} risk`);
+      lines.push(`Auto-heal: ${overview.self_heal_enabled ? "ENABLED (max retries: " + overview.max_retries + ")" : "DISABLED"}`);
+      lines.push(`Repository: ${overview.repository || "not set"}`);
+      lines.push(`Branch: ${overview.branch || "main"}`);
     }
+
+    // ── Recent runs with errors ────────────────────────────
+    if (runs?.runs?.length > 0) {
+      lines.push("
+=== RECENT RUNS (last 10) ===");
+      runs.runs.slice(0, 10).forEach((r: any) => {
+        lines.push(`Run #${r.id}: ${r.status.toUpperCase()} | stage: ${r.failed_stage || "all passed"} | duration: ${r.duration_seconds}s | env: ${r.environment}`);
+        if (r.root_cause) lines.push(`  Root cause: ${r.root_cause}`);
+        if (r.risk_score != null) lines.push(`  Risk: ${Math.round(r.risk_score * 100)}%`);
+      });
+
+      // Failed runs summary
+      const failed = runs.runs.filter((r: any) => r.status === "failed");
+      if (failed.length > 0) {
+        lines.push(`
+Failed runs: ${failed.length}/${runs.runs.length}`);
+        const stages: Record<string, number> = {};
+        failed.forEach((r: any) => {
+          if (r.failed_stage) stages[r.failed_stage] = (stages[r.failed_stage] || 0) + 1;
+        });
+        if (Object.keys(stages).length > 0) {
+          lines.push("Most failing stages: " + Object.entries(stages).sort((a,b) => b[1]-a[1]).map(([s,c]) => `${s}(${c}x)`).join(", "));
+        }
+      }
+    }
+
+    // ── Healing events ─────────────────────────────────────
     if (healing?.events?.length > 0) {
-      lines.push("\nRECENT HEALING EVENTS:");
-      healing.events.slice(0, 5).forEach((e: any) => {
-        lines.push(`Run #${e.run_id}: ${e.action} -> ${e.result} | ${e.reason}`);
+      lines.push("
+=== HEALING HISTORY ===");
+      healing.events.slice(0, 8).forEach((e: any) => {
+        lines.push(`Run #${e.run_id}: ${e.action} → ${e.result} | ${e.reason}`);
         if (e.agent_analysed) {
-          if (e.agent_summary)      lines.push(`  Summary: ${e.agent_summary}`);
-          if (e.agent_proposed_fix) lines.push(`  Fix: ${e.agent_proposed_fix}`);
-          if (e.agent_fix_code)     lines.push(`  Code: ${e.agent_fix_code}`);
+          if (e.agent_summary)      lines.push(`  AI diagnosis: ${e.agent_summary}`);
+          if (e.agent_root_cause)   lines.push(`  Root cause: ${e.agent_root_cause}`);
+          if (e.agent_proposed_fix) lines.push(`  Proposed fix: ${e.agent_proposed_fix}`);
+          if (e.agent_fix_code)     lines.push(`  Fix code: ${e.agent_fix_code}`);
+          if (e.agent_affected_file) lines.push(`  File to change: ${e.agent_affected_file}`);
         }
       });
+
+      const healed = healing.events.filter((e: any) => e.result === "retry_succeeded").length;
+      lines.push(`Healing success rate: ${healed}/${healing.events.length} (${Math.round(healed/healing.events.length*100)}%)`);
     }
-    return lines.join("\n");
+
+    // ── ML risk factors ────────────────────────────────────
+    if (ml?.factors?.length > 0) {
+      lines.push("
+=== ML RISK FACTORS ===");
+      ml.factors.forEach((f: any) => {
+        lines.push(`${f.name}: ${Math.round((f.score || 0) * 100)}% (weight: ${f.weight}) — ${f.description}`);
+      });
+      if (ml.current_risk?.used_ml) {
+        lines.push(`ML model confidence: ${Math.round((ml.current_risk.confidence || 0) * 100)}% based on ${ml.current_risk.based_on_runs} runs`);
+      }
+    }
+
+    return lines.join("
+");
   };
 
   const sendMessage = async (text: string) => {
@@ -105,53 +162,70 @@ function AgentChat({ pipelineId, pipelineName, healing, overview }: {
     setSending(true);
 
     try {
-      const context  = buildContext();
-      const apiKey   = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "";
-
+      const apiKey = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "";
       if (!apiKey) {
-        throw new Error("NEXT_PUBLIC_ANTHROPIC_API_KEY not set in Railway frontend Variables");
+        throw new Error(
+          "ANTHROPIC_API_KEY not set. Go to Railway → devops-orchestration (frontend service) → Variables → add NEXT_PUBLIC_ANTHROPIC_API_KEY"
+        );
       }
+
+      const context = buildContext();
 
       const history = messages
         .filter(m => !m.isLoading)
         .map(m => ({
-          role:    m.role === "user" ? "user" : "assistant",
+          role:    m.role === "user" ? "user" : "assistant" as const,
           content: m.content,
         }));
+
+      const systemPrompt = `You are an intelligent AI DevOps agent exclusively for the pipeline "${pipelineName}" (Pipeline ID: ${pipelineId}).
+
+You have complete, real-time knowledge of this pipeline:
+
+${context}
+
+YOUR CAPABILITIES:
+1. Answer any question about this pipeline specifically — failures, errors, patterns, risk
+2. When asked to fix an error, provide the EXACT file and code change needed
+3. Identify patterns across multiple runs (e.g. "this stage always fails on Mondays")
+4. Explain risk scores in plain English based on the actual factors above
+5. Suggest preventive actions based on the failure history
+
+YOUR RULES:
+- You ONLY help with this specific pipeline — never generic advice
+- Always reference specific run numbers, error messages, and stage names from the context above
+- When suggesting a code fix, format it as:
+  **File:** filename.py
+  \`\`\`
+  exact code to add/change
+  \`\`\`
+- If the user asks to "fix" something, give them the exact change — not "you should consider"
+- Be direct, specific, and actionable
+- If you don't have enough information to answer, say exactly what information is missing`;
 
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
-          "Content-Type":    "application/json",
-          "x-api-key":       apiKey,
-          "anthropic-version": "2023-06-01",
+          "Content-Type":       "application/json",
+          "x-api-key":          apiKey,
+          "anthropic-version":  "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
           model:      "claude-sonnet-4-20250514",
-          max_tokens: 1024,
-          system: `You are an AI DevOps agent for the pipeline "${pipelineName}" only.
-You have full context about this pipeline:
-
-${context}
-
-Rules:
-- Only help with THIS specific pipeline
-- When asked to fix an error, give the EXACT file name and content to change
-- Be specific and direct — no generic advice
-- Format code in markdown code blocks with the filename
-- Keep answers concise and actionable`,
-          messages: [...history, { role: "user", content: text }],
+          max_tokens: 2048,
+          system:     systemPrompt,
+          messages:   [...history, { role: "user", content: text }],
         }),
       });
 
       if (!resp.ok) {
-        const err = await resp.json();
-        throw new Error(err.error?.message || `API error ${resp.status}`);
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error?.message || `API returned ${resp.status}`);
       }
 
-      const data    = await resp.json();
-      const reply   = data.content?.[0]?.text || "Sorry, I could not generate a response.";
+      const data  = await resp.json();
+      const reply = data.content?.[0]?.text || "Sorry, I could not generate a response.";
 
       setMessages(prev => prev.map((m, i) =>
         i === prev.length - 1
@@ -161,7 +235,7 @@ Rules:
     } catch (err: any) {
       setMessages(prev => prev.map((m, i) =>
         i === prev.length - 1
-          ? { role: "agent", content: `⚠️ Error: ${err.message}`, timestamp: new Date() }
+          ? { role: "agent", content: `⚠️ ${err.message}`, timestamp: new Date() }
           : m
       ));
     } finally {
@@ -172,19 +246,20 @@ Rules:
   const fmt = (text: string) =>
     text
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/```([\s\S]*?)```/g, "<pre class=\"cb\">$1</pre>")
-      .replace(/`([^`]+)`/g, "<code class=\"ic\">$1</code>")
-      .replace(/\n/g, "<br/>");
+      .replace(/```([\s\S]*?)```/g, "<pre class="cb">$1</pre>")
+      .replace(/`([^`]+)`/g, "<code class="ic">$1</code>")
+      .replace(/
+/g, "<br/>");
 
   return (
-    <div className="flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" style={{ height: "580px" }}>
+    <div className="flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" style={{ height: "600px" }}>
 
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2 bg-purple-950/30">
-        <span>🤖</span>
+        <span className="text-base">🤖</span>
         <div className="flex-1">
           <p className="text-sm font-semibold text-purple-200">Pipeline Agent</p>
-          <p className="text-xs text-purple-500">{pipelineName}</p>
+          <p className="text-xs text-purple-500">{pipelineName} — {runs?.total || 0} runs · {healing?.summary?.total || 0} healing events</p>
         </div>
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full bg-green-500" />
@@ -197,44 +272,44 @@ Rules:
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             {msg.role === "agent" && (
-              <div className="w-6 h-6 rounded-full bg-purple-800 flex items-center justify-center text-xs flex-shrink-0 mt-1">🤖</div>
+              <div className="w-7 h-7 rounded-full bg-purple-800 flex items-center justify-center text-xs flex-shrink-0 mt-0.5">🤖</div>
             )}
-            <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
+            <div className={`max-w-[88%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
               msg.role === "user"
                 ? "bg-blue-600 text-white rounded-br-none"
                 : "bg-gray-800 text-gray-200 rounded-bl-none"
             }`}>
               {msg.isLoading ? (
-                <div className="flex items-center gap-1 py-1">
+                <div className="flex items-center gap-1.5 py-1">
                   {[0, 150, 300].map(d => (
-                    <div key={d} className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                    <div key={d} className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
                   ))}
                 </div>
               ) : (
                 <>
                   <div dangerouslySetInnerHTML={{ __html: fmt(msg.content) }} />
-                  <p className="text-xs opacity-30 mt-1">
+                  <p className="text-xs opacity-30 mt-1.5">
                     {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </>
               )}
             </div>
             {msg.role === "user" && (
-              <div className="w-6 h-6 rounded-full bg-blue-700 flex items-center justify-center text-xs flex-shrink-0 mt-1 font-bold">Y</div>
+              <div className="w-7 h-7 rounded-full bg-blue-700 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">Y</div>
             )}
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
 
-      {/* Quick prompts — only shown at the start */}
+      {/* Quick prompts */}
       {messages.length === 1 && (
-        <div className="px-4 pb-2">
-          <p className="text-xs text-gray-600 mb-2">Try asking:</p>
+        <div className="px-4 pb-3">
+          <p className="text-xs text-gray-600 mb-2">Quick questions:</p>
           <div className="flex flex-wrap gap-1.5">
             {QUICK_PROMPTS.map(p => (
               <button key={p} onClick={() => sendMessage(p)}
-                className="text-xs bg-gray-800 hover:bg-purple-900/40 border border-gray-700 hover:border-purple-700 text-gray-400 hover:text-purple-300 px-2.5 py-1 rounded-full transition-all">
+                className="text-xs bg-gray-800 hover:bg-purple-900/40 border border-gray-700 hover:border-purple-700 text-gray-400 hover:text-purple-300 px-2.5 py-1.5 rounded-full transition-all">
                 {p}
               </button>
             ))}
@@ -249,14 +324,14 @@ Rules:
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage(input)}
-          placeholder="Ask about this pipeline..."
+          placeholder="Ask about this pipeline — errors, fixes, risk..."
           disabled={sending}
-          className="flex-1 bg-gray-800 border border-gray-700 focus:border-purple-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none disabled:opacity-50"
+          className="flex-1 bg-gray-800 border border-gray-700 focus:border-purple-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none disabled:opacity-50 transition-colors"
         />
         <button
           onClick={() => sendMessage(input)}
           disabled={sending || !input.trim()}
-          className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors min-w-[44px] flex items-center justify-center">
           {sending
             ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
             : "→"}
@@ -264,8 +339,8 @@ Rules:
       </div>
 
       <style>{`
-        .cb { background:#030712; border:1px solid #374151; border-radius:6px; padding:8px 10px; font-family:monospace; font-size:11px; color:#86efac; white-space:pre-wrap; margin:4px 0; display:block; overflow-x:auto; }
-        .ic { background:#1f2937; color:#93c5fd; padding:1px 5px; border-radius:4px; font-family:monospace; font-size:11px; }
+        .cb { background: #030712; border: 1px solid #374151; border-radius: 6px; padding: 10px 12px; font-family: monospace; font-size: 11px; color: #86efac; white-space: pre-wrap; margin: 6px 0; display: block; overflow-x: auto; line-height: 1.6; }
+        .ic { background: #1f2937; color: #93c5fd; padding: 1px 6px; border-radius: 4px; font-family: monospace; font-size: 11px; }
       `}</style>
     </div>
   );
@@ -309,6 +384,14 @@ export default function PipelineDetailPage() {
       if (t === "healing" || t === "agent") {
         const r = await axios.get(`${B}/api/v1/pipelines/${id}/healing`, { headers: H });
         setHealing(r.data);
+      }
+      if (t === "agent") {
+        const [rr, mr] = await Promise.all([
+          axios.get(`${B}/api/v1/pipelines/${id}/runs`, { headers: H }),
+          axios.get(`${B}/api/v1/pipelines/${id}/ml`, { headers: H }),
+        ]);
+        setRuns(rr.data);
+        setMl(mr.data);
       }
       if (t === "ml") {
         const r = await axios.get(`${B}/api/v1/pipelines/${id}/ml`, { headers: H });
@@ -717,6 +800,8 @@ export default function PipelineDetailPage() {
                   pipelineName={overview?.name || "Pipeline"}
                   healing={healing}
                   overview={overview}
+                  runs={runs}
+                  ml={ml}
                 />
 
                 {/* Past auto-analyses */}
