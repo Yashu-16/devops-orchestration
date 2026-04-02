@@ -144,11 +144,16 @@ def delete_pipeline(
             {"pid": pipeline_id}
         )
 
-        # 5. Delete notifications linked to this pipeline
+        # 5. Clear notifications linked to this pipeline and its runs
         db.execute(
             text("UPDATE notifications SET pipeline_id = NULL WHERE pipeline_id = :pid"),
             {"pid": pipeline_id}
         )
+        if run_ids:
+            db.execute(
+                text("UPDATE notifications SET run_id = NULL WHERE run_id = ANY(:ids)"),
+                {"ids": run_ids}
+            )
 
         # 6. Delete all runs
         db.execute(
