@@ -145,8 +145,7 @@ Failed runs: ${failed.length}/${runs.runs.length}`);
       }
     }
 
-    return lines.join("
-");
+    return lines.join("\n");
   };
 
   const sendMessage = async (text: string) => {
