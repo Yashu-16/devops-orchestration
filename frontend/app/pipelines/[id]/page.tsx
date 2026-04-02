@@ -94,8 +94,7 @@ function AgentChat({ pipelineId, pipelineName, healing, overview, runs, ml }: {
 
     // ── Recent runs with errors ────────────────────────────
     if (runs?.runs?.length > 0) {
-      lines.push("
-=== RECENT RUNS (last 10) ===");
+      lines.push("=== RECENT RUNS (last 10) ===");
       runs.runs.slice(0, 10).forEach((r: any) => {
         lines.push(`Run #${r.id}: ${r.status.toUpperCase()} | stage: ${r.failed_stage || "all passed"} | duration: ${r.duration_seconds}s | env: ${r.environment}`);
         if (r.root_cause) lines.push(`  Root cause: ${r.root_cause}`);
@@ -119,8 +118,7 @@ Failed runs: ${failed.length}/${runs.runs.length}`);
 
     // ── Healing events ─────────────────────────────────────
     if (healing?.events?.length > 0) {
-      lines.push("
-=== HEALING HISTORY ===");
+      lines.push("=== HEALING HISTORY ===");
       healing.events.slice(0, 8).forEach((e: any) => {
         lines.push(`Run #${e.run_id}: ${e.action} → ${e.result} | ${e.reason}`);
         if (e.agent_analysed) {
@@ -138,8 +136,7 @@ Failed runs: ${failed.length}/${runs.runs.length}`);
 
     // ── ML risk factors ────────────────────────────────────
     if (ml?.factors?.length > 0) {
-      lines.push("
-=== ML RISK FACTORS ===");
+      lines.push("=== ML RISK FACTORS ===");
       ml.factors.forEach((f: any) => {
         lines.push(`${f.name}: ${Math.round((f.score || 0) * 100)}% (weight: ${f.weight}) — ${f.description}`);
       });
