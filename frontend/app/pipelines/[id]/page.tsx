@@ -60,14 +60,35 @@ function AgentChat({ pipelineId, pipelineName, healing, overview, runs, ml }: {
   runs: any;
   ml: any;
 }) {
-  const [messages, setMessages] = React.useState<ChatMessage[]>([{
-    role: "agent",
-    content: `Hi! I am the AI agent for **${pipelineName}**. I have full knowledge of this pipeline — every run, every error, every healing event, and the current risk score. What would you like to know or fix?`,
-    timestamp: new Date(),
-  }]);
+  const STORAGE_KEY = `agent_chat_${pipelineId}`;
+
+  const loadMessages = (): ChatMessage[] => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }));
+      }
+    } catch {}
+    return [{
+      role: "agent",
+      content: `Hi! I am the AI agent for **${pipelineName}**. I have full knowledge of this pipeline — every run, every error, every healing event, and the current risk score. What would you like to know or fix?`,
+      timestamp: new Date(),
+    }];
+  };
+
+  const [messages, setMessages] = React.useState<ChatMessage[]>(loadMessages);
   const [input,   setInput]   = React.useState("");
   const [sending, setSending] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
+
+  // Save messages to localStorage whenever they change
+  React.useEffect(() => {
+    try {
+      const toSave = messages.filter(m => !m.isLoading);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    } catch {}
+  }, [messages]);
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -220,9 +241,26 @@ Failed runs: ${failed.length}/${runs.runs.length}`);
           <p className="text-sm font-semibold text-purple-200">Pipeline Agent</p>
           <p className="text-xs text-purple-500">{pipelineName} — {runs?.total || 0} runs · {healing?.summary?.total || 0} healing events</p>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2 h-2 rounded-full bg-green-500" />
-          <span className="text-xs text-green-400">Active</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              if (confirm("Clear chat history for this pipeline?")) {
+                localStorage.removeItem(STORAGE_KEY);
+                setMessages([{
+                  role: "agent",
+                  content: `Chat cleared. Hi again! I am the AI agent for **${pipelineName}**. What would you like to know?`,
+                  timestamp: new Date(),
+                }]);
+              }
+            }}
+            className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+          >
+            Clear
+          </button>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-xs text-green-400">Active</span>
+          </div>
         </div>
       </div>
 
@@ -738,13 +776,14 @@ export default function PipelineDetailPage() {
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: "Auto-analyses done",  value: agentEvents.length },
-                    { label: "High confidence",     value: agentEvents.filter((e: any) => e.agent_confidence === "high").length },
-                    { label: "Auto-fixable errors", value: agentEvents.filter((e: any) => e.agent_can_auto_apply).length },
-                  ].map(({ label, value }) => (
+                    { label: "AI analyses done",    value: agentEvents.length, note: agentEvents.length === 0 ? "runs with failures will trigger auto-analysis" : "" },
+                    { label: "High confidence",     value: agentEvents.filter((e: any) => e.agent_confidence === "high").length, note: "" },
+                    { label: "Total healing events",value: healing?.summary?.total ?? 0, note: "" },
+                  ].map(({ label, value, note }) => (
                     <div key={label} className="bg-purple-900/20 border border-purple-800/30 rounded-lg p-3 text-center">
                       <p className="text-xl font-bold text-purple-300">{value}</p>
                       <p className="text-xs text-purple-500 mt-0.5">{label}</p>
+                      {note && <p className="text-xs text-purple-700 mt-1 leading-tight">{note}</p>}
                     </div>
                   ))}
                 </div>
