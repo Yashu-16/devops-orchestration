@@ -599,40 +599,199 @@ def get_stats(
 
 
 # ── Webhooks ──────────────────────────────────────────────────────
+#
+# Your ci.yml sends TWO webhooks:
+#   1. action=in_progress  → pipeline just started  → create a RUNNING run
+#   2. action=completed    → pipeline finished       → update run with REAL result
+#
+# The old handler ignored action/conclusion and just re-simulated.
+# This fix records the real GitHub Actions outcome.
+
+import datetime as _dt
+
+def _find_pipeline_for_webhook(repo_url: str, branch: str, db: Session):
+    """Match a GitHub repo+branch to a DecisionOps pipeline."""
+    def norm(url: str) -> str:
+        url = url.strip().rstrip("/").rstrip(".git").lower()
+        for prefix in ["https://github.com/", "http://github.com/", "git@github.com:"]:
+            if url.startswith(prefix):
+                return url[len(prefix):]
+        return url
+
+    norm_url = norm(repo_url)
+    for p in db.query(Pipeline).all():
+        if not p.repository:
+            continue
+        if norm(p.repository) == norm_url:
+            if p.branch in (branch, "*") or branch in (p.branch, "*"):
+                return p
+    return None
+
 
 @router.post("/webhooks/github", tags=["Webhooks"])
 async def github_webhook(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    payload  = await request.json()
-    ref      = payload.get("ref", "")
-    branch   = ref.replace("refs/heads/", "")
-    repo_url = payload.get("repository", {}).get("clone_url", "")
-    pusher   = payload.get("pusher", {}).get("name", "webhook")
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored", "reason": "invalid JSON"}
 
-    if not repo_url:
-        return {"status": "ignored", "reason": "no repository URL"}
+    action       = payload.get("action", "")
+    workflow_run = payload.get("workflow_run", {})
+    repo         = payload.get("repository", {})
+    sender       = payload.get("sender", {})
 
-    pipelines = db.query(Pipeline).all()
-    matched   = None
-    for p in pipelines:
-        if p.repository and (
-            p.repository in repo_url or
-            repo_url.replace("https://github.com/", "") in (p.repository or "")
-        ):
-            if p.branch == branch or p.branch == "*":
-                matched = p
-                break
+    repo_url     = repo.get("clone_url", "") or repo.get("html_url", "")
+    repo_name    = repo.get("full_name", "")
+    branch       = workflow_run.get("head_branch", "") or payload.get("ref", "").replace("refs/heads/", "")
+    conclusion   = workflow_run.get("conclusion", "")
+    commit_sha   = (workflow_run.get("head_sha", "") or "")[:8]
+    actor        = sender.get("login", "") or payload.get("pusher", {}).get("name", "webhook")
+    failed_tests = workflow_run.get("failed_tests", "")
+
+    logger.info(f"GitHub webhook: action={action!r} conclusion={conclusion!r} repo={repo_name} branch={branch}")
+
+    match_url = repo_url or f"https://github.com/{repo_name}.git"
+    matched   = _find_pipeline_for_webhook(match_url, branch, db)
 
     if not matched:
-        return {"status": "ignored", "reason": "no matching pipeline"}
+        logger.info(f"No pipeline matched for {match_url}@{branch}")
+        return {"status": "ignored", "reason": f"no pipeline matched for {repo_name}@{branch}"}
 
-    service = RealPipelineService(db)
-    run     = service.execute_pipeline(matched, triggered_by=f"webhook:{pusher}")
+    # ── action=in_progress: GitHub Actions run just started ───────
+    if action == "in_progress":
+        run = PipelineRun(
+            pipeline_id   = matched.id,
+            status        = PipelineStatus.RUNNING,
+            triggered_by  = f"github:{actor}",
+            environment   = "staging",
+            git_commit    = commit_sha,
+            git_author    = actor,
+            stages_total  = 4,
+            stages_passed = 0,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        logger.info(f"Created RUNNING run #{run.id} for '{matched.name}'")
+        return {"status": "running", "pipeline": matched.name, "run_id": run.id}
 
-    return {
-        "status":   "triggered",
-        "pipeline": matched.name,
-        "run_id":   run.id,
-    }
+    # ── action=completed: GitHub Actions run finished ─────────────
+    if action == "completed":
+        # Find the RUNNING run we created in the in_progress step
+        existing_run = (
+            db.query(PipelineRun)
+            .filter(
+                PipelineRun.pipeline_id == matched.id,
+                PipelineRun.status      == PipelineStatus.RUNNING,
+            )
+            .order_by(PipelineRun.created_at.desc())
+            .first()
+        )
+
+        # Map GitHub conclusion to our status
+        if conclusion == "success":
+            final_status = PipelineStatus.SUCCESS
+        else:
+            final_status = PipelineStatus.FAILED
+
+        if existing_run:
+            run = existing_run
+        else:
+            # in_progress was missed — create the run now
+            run = PipelineRun(
+                pipeline_id   = matched.id,
+                triggered_by  = f"github:{actor}",
+                environment   = "staging",
+                git_commit    = commit_sha,
+                git_author    = actor,
+                stages_total  = 4,
+                stages_passed = 0,
+            )
+            db.add(run)
+            db.flush()
+
+        # Update with real result
+        run.status     = final_status
+        run.git_commit = commit_sha or run.git_commit
+        run.git_author = actor     or run.git_author
+
+        # Calculate duration
+        if run.created_at:
+            delta = _dt.datetime.utcnow() - run.created_at.replace(tzinfo=None)
+            run.duration_seconds = max(1, int(delta.total_seconds()))
+
+        if final_status == PipelineStatus.SUCCESS:
+            run.stages_passed = run.stages_total or 4
+            run.failed_stage  = None
+            run.root_cause    = None
+            run.recommendation= None
+            logger.info(f"Run #{run.id} → SUCCESS for '{matched.name}'")
+
+        else:
+            # Real failure — record actual error details
+            run.stages_passed = 2   # checkout + install passed
+            run.failed_stage  = "unit_tests"
+
+            if failed_tests:
+                # GitHub sent us the actual failing test names
+                tests = [t.strip() for t in failed_tests.split(",") if t.strip()]
+                test_str = ", ".join(tests[:5])
+                run.root_cause = (
+                    f"[TEST_FAILURE] The following tests failed in GitHub Actions: {test_str}. "
+                    f"Commit: {commit_sha}."
+                )
+                run.recommendation = (
+                    f"Fix the failing tests: {test_str}. "
+                    f"Run `pytest {' '.join(tests[:3])} -v` locally to reproduce."
+                )
+            elif conclusion == "timed_out":
+                run.failed_stage  = "run_tests"
+                run.root_cause    = "[INFRASTRUCTURE] Pipeline timed out."
+                run.recommendation= "Check for infinite loops or slow network calls in tests."
+            else:
+                run.root_cause = (
+                    f"[TEST_FAILURE] GitHub Actions pipeline failed (conclusion={conclusion}). "
+                    f"Commit: {commit_sha}. Open GitHub Actions to see the full error log."
+                )
+                run.recommendation = (
+                    "Go to GitHub Actions and open the failed run to see the exact error."
+                )
+
+            db.commit()
+
+            # Run failure analysis on the real data
+            try:
+                engine = FailureAnalysisEngine()
+                result = engine.analyze(run)
+                if result:
+                    run.root_cause     = f"[{result.root_cause_category.upper()}] {result.explanation}"
+                    run.recommendation = result.suggestion
+                    logger.info(f"Failure analysis: {result.root_cause_category} for run #{run.id}")
+            except Exception as e:
+                logger.warning(f"Failure analysis error for run #{run.id}: {e}")
+
+            # Trigger self-healing if enabled
+            try:
+                healing_engine = SelfHealingEngine(db)
+                healing_engine.process(run)
+            except Exception as e:
+                logger.warning(f"Healing engine error for run #{run.id}: {e}")
+
+            logger.info(f"Run #{run.id} → FAILED for '{matched.name}': {run.root_cause}")
+
+        db.commit()
+        db.refresh(run)
+
+        return {
+            "status":     "recorded",
+            "pipeline":   matched.name,
+            "run_id":     run.id,
+            "conclusion": conclusion,
+            "result":     final_status.value,
+        }
+
+    # ── Unknown action — ignore ────────────────────────────────────
+    return {"status": "ignored", "reason": f"unhandled action: {action!r}"}
