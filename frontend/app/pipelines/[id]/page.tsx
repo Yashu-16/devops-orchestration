@@ -158,70 +158,34 @@ Failed runs: ${failed.length}/${runs.runs.length}`);
     setSending(true);
 
     try {
-      const apiKey = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || "";
-      if (!apiKey) {
-        throw new Error(
-          "ANTHROPIC_API_KEY not set. Go to Railway → devops-orchestration (frontend service) → Variables → add NEXT_PUBLIC_ANTHROPIC_API_KEY"
-        );
-      }
-
-      const context = buildContext();
-
       const history = messages
         .filter(m => !m.isLoading)
         .map(m => ({
-          role:    m.role === "user" ? "user" : "assistant" as const,
+          role:    m.role === "user" ? "user" : "assistant",
           content: m.content,
         }));
 
-      const systemPrompt = `You are an intelligent AI DevOps agent exclusively for the pipeline "${pipelineName}" (Pipeline ID: ${pipelineId}).
+      const token = localStorage.getItem("token") || "";
 
-You have complete, real-time knowledge of this pipeline:
-
-${context}
-
-YOUR CAPABILITIES:
-1. Answer any question about this pipeline specifically — failures, errors, patterns, risk
-2. When asked to fix an error, provide the EXACT file and code change needed
-3. Identify patterns across multiple runs (e.g. "this stage always fails on Mondays")
-4. Explain risk scores in plain English based on the actual factors above
-5. Suggest preventive actions based on the failure history
-
-YOUR RULES:
-- You ONLY help with this specific pipeline — never generic advice
-- Always reference specific run numbers, error messages, and stage names from the context above
-- When suggesting a code fix, format it as:
-  **File:** filename.py
-  \`\`\`
-  exact code to add/change
-  \`\`\`
-- If the user asks to "fix" something, give them the exact change — not "you should consider"
-- Be direct, specific, and actionable
-- If you don't have enough information to answer, say exactly what information is missing`;
-
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch(`${getBackend()}/api/v1/pipelines/${pipelineId}/agent/chat`, {
         method: "POST",
         headers: {
-          "Content-Type":       "application/json",
-          "x-api-key":          apiKey,
-          "anthropic-version":  "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${token}`,
         },
         body: JSON.stringify({
-          model:      "claude-sonnet-4-20250514",
-          max_tokens: 2048,
-          system:     systemPrompt,
-          messages:   [...history, { role: "user", content: text }],
+          message: text,
+          history: history,
         }),
       });
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error?.message || `API returned ${resp.status}`);
+        throw new Error(err.detail || `Backend error ${resp.status}`);
       }
 
       const data  = await resp.json();
-      const reply = data.content?.[0]?.text || "Sorry, I could not generate a response.";
+      const reply = data.reply || "Sorry, I could not generate a response.";
 
       setMessages(prev => prev.map((m, i) =>
         i === prev.length - 1

@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.core.logging_config import setup_logging
 from app.core.errors import register_error_handlers
 from app.db.database import engine, Base
-from app.api.routes import pipelines, auth, team, integrations, notifications, ml, pipeline_detail
+from app.api.routes import pipelines, auth, team, integrations, notifications, ml, pipeline_detail, agent_chat
 
 setup_logging()
 import logging
@@ -61,6 +61,7 @@ app.include_router(integrations.router,  prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(ml.router,            prefix="/api/v1")
 app.include_router(pipeline_detail.router, prefix="/api/v1")
+app.include_router(agent_chat.router, prefix="/api/v1")
 
 @app.get("/health")
 def health_check():
