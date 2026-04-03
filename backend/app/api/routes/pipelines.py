@@ -650,6 +650,7 @@ async def github_webhook(
     commit_sha   = (workflow_run.get("head_sha", "") or "")[:8]
     actor        = sender.get("login", "") or payload.get("pusher", {}).get("name", "webhook")
     failed_tests = workflow_run.get("failed_tests", "")
+    error_output = workflow_run.get("error_output", "")
 
     logger.info(f"GitHub webhook: action={action!r} conclusion={conclusion!r} repo={repo_name} branch={branch}")
 
@@ -758,19 +759,28 @@ async def github_webhook(
             if failed_tests:
                 tests    = [t.strip() for t in failed_tests.split(",") if t.strip()]
                 test_str = ", ".join(tests[:5])
+                real_error = error_output.strip() if error_output else f"FAILED: {test_str}"
                 run.root_cause = (
-                    f"[TEST_FAILURE] Tests failed in GitHub Actions: {test_str}. "
+                    f"[TEST_FAILURE] Tests failed: {test_str}. "
                     f"Commit: {commit_sha}."
                 )
                 run.recommendation = (
                     f"Fix the failing tests: {test_str}. "
                     f"Run `pytest -v` locally to reproduce the exact error."
                 )
-                error_output = f"FAILED: {test_str}"
+                error_output_for_stage = real_error
+            elif error_output:
+                # We have raw error output even without named failing tests
+                run.root_cause = (
+                    f"[TEST_FAILURE] Tests failed. Commit: {commit_sha}. "
+                    f"Error: {error_output[:300]}"
+                )
+                run.recommendation = "Fix the error shown below and push again."
+                error_output_for_stage = error_output
             elif conclusion == "timed_out":
                 run.root_cause     = "[INFRASTRUCTURE] Pipeline timed out during test execution."
                 run.recommendation = "Check for infinite loops or slow network calls in your tests."
-                error_output       = "Pipeline exceeded the time limit"
+                error_output_for_stage = "Pipeline exceeded the time limit"
             else:
                 run.root_cause = (
                     f"[TEST_FAILURE] GitHub Actions failed (conclusion={conclusion}). "
@@ -779,13 +789,13 @@ async def github_webhook(
                 run.recommendation = (
                     "Open GitHub Actions to see the exact error output for this commit."
                 )
-                error_output = f"GitHub Actions conclusion: {conclusion}"
+                error_output_for_stage = f"GitHub Actions conclusion: {conclusion}"
 
             # Create real stage logs — 2 passed, run_tests failed
             stage_results = [
                 ("checkout",             True,  1,  "Checked out repository successfully", None),
                 ("install_dependencies", True,  3,  "pip install completed successfully",  None),
-                ("run_tests",            False, 5,  "Running pytest...",                   error_output),
+                ("run_tests",            False, 5,  "Running pytest...",                   error_output_for_stage),
             ]
             for name, passed, dur, out, err in stage_results:
                 stage = StageLog(
